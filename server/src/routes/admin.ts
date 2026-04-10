@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as adminRenewal from '../services/admin-renewal.js';
 import * as db from '../db/queries.js';
 import { ValidationError } from '../middleware/error-handler.js';
+import { asyncHandler } from '../middleware/async-handler.js';
 
 const router = Router();
 
@@ -28,10 +29,10 @@ router.get('/token-status', (_req: Request, res: Response) => {
 });
 
 // Manual renewal trigger
-router.post('/token-renew', async (_req: Request, res: Response) => {
+router.post('/token-renew', asyncHandler(async (_req: Request, res: Response) => {
   const result = await adminRenewal.renewToken();
   res.json({ success: true, data: result });
-});
+}));
 
 // Update renewal config
 const configSchema = z.object({

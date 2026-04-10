@@ -125,7 +125,6 @@ function permissionsToGroupProperties(name: string, permissions: PermissionFlags
     accessAndManageCdn: permissions.accessAndManageCdn ?? false,
     accessAndManageVpn: permissions.accessAndManageVpn ?? false,
     accessAndManageApiGateway: permissions.accessAndManageApiGateway ?? false,
-    accessAndManageNgs: permissions.accessAndManageNgs ?? false,
     accessAndManageKaas: permissions.accessAndManageKaas ?? false,
     accessAndManageNetworkFileStorage: permissions.accessAndManageNetworkFileStorage ?? false,
     accessAndManageAiModelHub: permissions.accessAndManageAiModelHub ?? false,

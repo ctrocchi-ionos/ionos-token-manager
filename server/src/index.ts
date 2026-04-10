@@ -52,13 +52,6 @@ if (existsSync(clientDist)) {
 // Error handler (must be last)
 app.use(errorHandler);
 
-// Wrap async route handlers to catch errors
-function wrapAsync(app: express.Express) {
-  const methods = ['get', 'post', 'put', 'delete', 'patch'] as const;
-  // Already handled in route files by express async error propagation
-  // Express 5+ handles async errors natively
-}
-
 // Initialize and start
 async function main() {
   console.log('='.repeat(60));

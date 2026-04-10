@@ -19,7 +19,7 @@ export interface PermissionFlags {
   accessAndManageCdn?: boolean;
   accessAndManageVpn?: boolean;
   accessAndManageApiGateway?: boolean;
-  accessAndManageNgs?: boolean;
+
   accessAndManageKaas?: boolean;
   accessAndManageNetworkFileStorage?: boolean;
   accessAndManageAiModelHub?: boolean;

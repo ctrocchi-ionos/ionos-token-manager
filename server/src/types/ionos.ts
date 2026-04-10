@@ -62,7 +62,7 @@ export interface IonosGroupProperties {
   accessAndManageCdn?: boolean;
   accessAndManageVpn?: boolean;
   accessAndManageApiGateway?: boolean;
-  accessAndManageNgs?: boolean;
+
   accessAndManageKaas?: boolean;
   accessAndManageNetworkFileStorage?: boolean;
   accessAndManageAiModelHub?: boolean;

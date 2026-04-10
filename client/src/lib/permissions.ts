@@ -27,7 +27,6 @@ export const PERMISSION_GROUPS: Record<string, Record<string, string>> = {
     accessAndManageCdn: 'CDN',
     accessAndManageVpn: 'VPN',
     accessAndManageApiGateway: 'API Gateway',
-    accessAndManageNgs: 'Network Gateway Service',
   },
   'Observability & Security': {
     accessActivityLog: 'Activity Log',
