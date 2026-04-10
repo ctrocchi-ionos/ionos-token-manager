@@ -302,6 +302,7 @@ export function updateAdminTokenConfig(update: {
 
 export function seedBuiltinTemplates(): void {
   const templates = [
+    { name: 'AI Model Hub', description: 'AI Model Hub access only', permissions: { accessAndManageAiModelHub: true } },
     { name: 'S3 Only', description: 'Object storage access only', permissions: { s3Privilege: true } },
     { name: 'Read-Only Monitoring', description: 'View activity logs and monitoring data', permissions: { accessActivityLog: true, accessAndManageMonitoring: true } },
     { name: 'Kubernetes Developer', description: 'Create and manage Kubernetes clusters and container registry', permissions: { createK8sCluster: true, manageRegistry: true, accessAndManageKaas: true } },
