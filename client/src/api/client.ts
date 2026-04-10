@@ -1,0 +1,273 @@
+const BASE_URL = '/api';
+
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: { code: string; message: string; details?: unknown };
+  pagination?: { total: number; page: number; limit: number };
+}
+
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public statusCode: number,
+    public details?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    ...options,
+  });
+
+  // Handle non-JSON responses (like CSV exports)
+  const contentType = res.headers.get('content-type');
+  if (contentType?.includes('text/csv')) {
+    const text = await res.text();
+    return { success: true, data: text as unknown as T };
+  }
+
+  const json: ApiResponse<T> = await res.json();
+  if (!json.success) {
+    throw new ApiError(
+      json.error?.message ?? 'Request failed',
+      json.error?.code ?? 'UNKNOWN',
+      res.status,
+      json.error?.details,
+    );
+  }
+  return json;
+}
+
+// ── Tokens ──
+
+export interface ManagedToken {
+  id: string;
+  name: string;
+  description: string | null;
+  ionosTokenId: string | null;
+  ionosUserId: string;
+  ionosGroupId: string;
+  subUserEmail: string;
+  permissions: Record<string, boolean>;
+  sharedResources: SharedResource[];
+  templateId: string | null;
+  ttlSeconds: number;
+  createdAt: string;
+  expiresAt: string;
+  status: string;
+  cleanupOnDelete: boolean;
+}
+
+export interface SharedResource {
+  resourceId: string;
+  type: string;
+  name: string;
+  editPrivilege: boolean;
+  sharePrivilege: boolean;
+}
+
+export interface CreateTokenPayload {
+  name: string;
+  description?: string;
+  permissions: Record<string, boolean>;
+  sharedResources?: SharedResource[];
+  ttlSeconds: number;
+  templateId?: string;
+  cleanupOnDelete?: boolean;
+}
+
+export interface TokenStats {
+  active: number;
+  expiringSoon: number;
+  expired: number;
+  revoked: number;
+  total: number;
+}
+
+export async function listTokens(params?: {
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.search) qs.set('search', params.search);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  const qstr = qs.toString();
+  return request<ManagedToken[]>(`/tokens${qstr ? `?${qstr}` : ''}`);
+}
+
+export async function getToken(id: string) {
+  return request<ManagedToken>(`/tokens/${id}`);
+}
+
+export async function getTokenStats() {
+  return request<TokenStats>('/tokens/stats');
+}
+
+export async function createToken(payload: CreateTokenPayload) {
+  return request<ManagedToken & { tokenValue: string }>('/tokens', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function regenerateToken(id: string) {
+  return request<{ tokenValue: string; expiresAt: string }>(`/tokens/${id}/regenerate`, {
+    method: 'POST',
+  });
+}
+
+export async function revokeToken(id: string) {
+  return request<{ message: string }>(`/tokens/${id}`, { method: 'DELETE' });
+}
+
+export async function bulkDeleteTokens(criteria: 'expired' | 'ids', ids?: string[]) {
+  return request<{ deleted: number; errors: string[] }>('/tokens/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify(criteria === 'expired' ? { criteria } : { ids }),
+  });
+}
+
+export async function exportTokens(format: 'json' | 'csv') {
+  const res = await fetch(`${BASE_URL}/tokens/export?format=${format}`);
+  return res;
+}
+
+// ── Templates ──
+
+export interface PermissionTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: Record<string, boolean>;
+  sharedResourceTypes: string[];
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listTemplates() {
+  return request<PermissionTemplate[]>('/templates');
+}
+
+export async function createTemplate(payload: {
+  name: string;
+  description?: string;
+  permissions: Record<string, boolean>;
+  sharedResourceTypes?: string[];
+}) {
+  return request<PermissionTemplate>('/templates', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteTemplate(id: string) {
+  return request<{ message: string }>(`/templates/${id}`, { method: 'DELETE' });
+}
+
+// ── Resources ──
+
+export interface DatacenterInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  location: string;
+}
+
+export interface ResourceInfo {
+  id: string;
+  type: string;
+  name: string;
+}
+
+export async function listDatacenters() {
+  return request<DatacenterInfo[]>('/resources/datacenters');
+}
+
+export async function listResources(type?: string) {
+  return request<ResourceInfo[]>(type ? `/resources/${type}` : '/resources/all');
+}
+
+// ── Admin ──
+
+export interface AdminTokenStatus {
+  tokenId: string | null;
+  issuedAt: string | null;
+  expiresAt: string | null;
+  daysRemaining: number;
+  autoRenewEnabled: boolean;
+  renewalTtlSeconds: number;
+  renewalThresholdSeconds: number;
+  lastRenewalAt: string | null;
+  lastRenewalError: string | null;
+}
+
+export interface HealthInfo {
+  status: string;
+  tokenStatus: AdminTokenStatus;
+  dbConnected: boolean;
+}
+
+export async function getHealth() {
+  return request<HealthInfo>('/admin/health');
+}
+
+export async function getAdminTokenStatus() {
+  return request<AdminTokenStatus>('/admin/token-status');
+}
+
+export async function renewAdminToken() {
+  return request<{ renewed: boolean; message: string }>('/admin/token-renew', {
+    method: 'POST',
+  });
+}
+
+export async function updateAdminTokenConfig(config: {
+  renewalTtlSeconds?: number;
+  renewalThresholdSeconds?: number;
+  autoRenewEnabled?: boolean;
+}) {
+  return request<AdminTokenStatus>('/admin/token-config', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  });
+}
+
+// ── Audit ──
+
+export interface AuditEntry {
+  id: number;
+  action: string;
+  entityType: string | null;
+  entityId: string | null;
+  details: Record<string, unknown> | null;
+  ionosRequestIds: string[] | null;
+  success: boolean;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export async function listAuditLog(params?: {
+  action?: string;
+  entityType?: string;
+  page?: number;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.action) qs.set('action', params.action);
+  if (params?.entityType) qs.set('entityType', params.entityType);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  const qstr = qs.toString();
+  return request<AuditEntry[]>(`/audit${qstr ? `?${qstr}` : ''}`);
+}
