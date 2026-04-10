@@ -130,6 +130,10 @@ export async function revokeToken(id: string) {
   return request<{ message: string }>(`/tokens/${id}`, { method: 'DELETE' });
 }
 
+export async function dismissToken(id: string) {
+  return request<{ message: string }>(`/tokens/${id}/dismiss`, { method: 'DELETE' });
+}
+
 export async function bulkDeleteTokens(criteria: 'expired' | 'ids', ids?: string[]) {
   return request<{ deleted: number; errors: string[] }>('/tokens/bulk-delete', {
     method: 'POST',

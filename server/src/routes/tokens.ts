@@ -128,6 +128,18 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, data: { message: 'Token revoked' } });
 }));
 
+// Remove from local DB (for revoked/expired tokens already cleaned up)
+router.delete('/:id/dismiss', (req: Request, res: Response) => {
+  const token = db.getManagedTokenById(req.params.id);
+  if (!token) throw new NotFoundError('Token', req.params.id);
+  if (token.status !== 'revoked' && token.status !== 'expired') {
+    throw new ValidationError('Only revoked or expired tokens can be dismissed. Revoke it first.');
+  }
+  db.deleteManagedToken(req.params.id);
+  db.insertAuditLog({ action: 'token.dismiss', entityType: 'token', entityId: req.params.id });
+  res.json({ success: true, data: { message: 'Token removed from list' } });
+});
+
 // Bulk delete
 router.post('/bulk-delete', asyncHandler(async (req: Request, res: Response) => {
   const { criteria, ids } = req.body as { criteria?: string; ids?: string[] };

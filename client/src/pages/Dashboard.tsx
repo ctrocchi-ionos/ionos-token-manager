@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { listTokens, getTokenStats, bulkDeleteTokens, revokeToken } from '@/api/client';
+import { listTokens, getTokenStats, bulkDeleteTokens, revokeToken, dismissToken } from '@/api/client';
 import ExpiryBadge from '@/components/ExpiryBadge';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { getEnabledPermissionLabels, countEnabledPermissions } from '@/lib/permissions';
@@ -17,6 +17,7 @@ import {
   Clock,
   AlertTriangle,
   XCircle,
+  X,
   Key,
 } from 'lucide-react';
 
@@ -55,6 +56,16 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ['tokenStats'] });
       toast.success('Token revoked');
       setDeleteTarget(null);
+    },
+    onError: (err) => toast.error(`Failed: ${err.message}`),
+  });
+
+  const dismissMut = useMutation({
+    mutationFn: dismissToken,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tokens'] });
+      queryClient.invalidateQueries({ queryKey: ['tokenStats'] });
+      toast.success('Token removed from list');
     },
     onError: (err) => toast.error(`Failed: ${err.message}`),
   });
@@ -240,13 +251,21 @@ export default function Dashboard() {
                       {formatDate(token.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {token.status !== 'revoked' && (
+                      {token.status !== 'revoked' && token.status !== 'expired' ? (
                         <button
                           onClick={() => setDeleteTarget(token.id)}
                           className="text-red-500 hover:text-red-700 p-1"
                           title="Revoke token"
                         >
                           <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => dismissMut.mutate(token.id)}
+                          className="text-gray-400 hover:text-gray-600 p-1"
+                          title="Remove from list"
+                        >
+                          <X className="w-4 h-4" />
                         </button>
                       )}
                     </td>
