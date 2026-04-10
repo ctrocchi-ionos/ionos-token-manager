@@ -5,7 +5,7 @@
   "description": "IONOS Cloud Token Manager — create scoped, labeled API tokens with real permission isolation",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
-    "build": "npm run build -w client && npm run build -w server",
+    "build": "npm run build -w client",
     "start": "npm run start -w server",
     "install:all": "npm install"
   },
