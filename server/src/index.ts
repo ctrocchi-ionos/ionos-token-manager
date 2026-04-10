@@ -3,6 +3,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { resolve, dirname } from 'path';
 import { existsSync } from 'fs';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { initializeDatabase } from './db/schema.js';
@@ -79,7 +80,8 @@ async function main() {
 
   // Start server
   app.listen(config.port, config.host, () => {
-    console.log(`\n[Server] Listening on http://${config.host}:${config.port}`);
+    const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`;
+    console.log(`\n[Server] Listening on ${url}`);
     console.log(`[Server] Admin token expires: ${config.tokenExpiresAt.toISOString()}`);
     console.log(`[Server] Contract: ${config.contractNumber}`);
     if (existsSync(clientDist)) {
@@ -88,6 +90,11 @@ async function main() {
       console.log(`[Server] No frontend build found. Run 'npm run build -w client' to build.`);
     }
     console.log('');
+
+    // Auto-open browser
+    const openCmd = process.platform === 'darwin' ? 'open' :
+                    process.platform === 'win32' ? 'start' : 'xdg-open';
+    exec(`${openCmd} ${url}`, () => {});
   });
 }
 
