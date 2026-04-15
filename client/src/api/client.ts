@@ -209,11 +209,7 @@ export interface AdminTokenStatus {
   issuedAt: string | null;
   expiresAt: string | null;
   daysRemaining: number;
-  autoRenewEnabled: boolean;
-  renewalTtlSeconds: number;
-  renewalThresholdSeconds: number;
-  lastRenewalAt: string | null;
-  lastRenewalError: string | null;
+  lastUpdatedAt: string | null;
 }
 
 export interface HealthInfo {
@@ -241,27 +237,10 @@ export async function getAdminTokenStatus() {
   return request<AdminTokenStatus>('/admin/token-status');
 }
 
-export async function renewAdminToken() {
-  return request<{ renewed: boolean; message: string }>('/admin/token-renew', {
-    method: 'POST',
-  });
-}
-
 export async function updateAdminToken(token: string) {
   return request<{ message: string }>('/admin/token', {
     method: 'PUT',
     body: JSON.stringify({ token }),
-  });
-}
-
-export async function updateAdminTokenConfig(config: {
-  renewalTtlSeconds?: number;
-  renewalThresholdSeconds?: number;
-  autoRenewEnabled?: boolean;
-}) {
-  return request<AdminTokenStatus>('/admin/token-config', {
-    method: 'PUT',
-    body: JSON.stringify(config),
   });
 }
 
@@ -283,9 +262,7 @@ export interface AccountUser {
   adminTokenStatus?: {
     expiresAt: string | null;
     daysRemaining: number;
-    autoRenewEnabled: boolean;
-    lastRenewalAt: string | null;
-    lastRenewalError: string | null;
+    lastUpdatedAt: string | null;
   };
 }
 

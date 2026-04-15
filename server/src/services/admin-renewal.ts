@@ -1,6 +1,5 @@
 import { config, decodeJwtHeader, decodeJwtPayload } from '../config.js';
 import { encrypt, decrypt } from './crypto.js';
-import * as ionosAuth from './ionos-auth.js';
 import * as db from '../db/queries.js';
 
 const CHECK_INTERVAL_MS = 3600000; // 1 hour
@@ -58,6 +57,12 @@ export async function configureAdminToken(rawToken: string): Promise<void> {
     expiresAt: new Date(payload.exp * 1000).toISOString(),
   });
 
+  // Record when the token was last configured and clear any stale error
+  db.updateAdminTokenRenewal({
+    lastRenewalAt: new Date().toISOString(),
+    lastRenewalError: null,
+  });
+
   db.insertAuditLog({
     action: 'admin.configure',
     entityType: 'admin',
@@ -70,99 +75,39 @@ export async function configureAdminToken(rawToken: string): Promise<void> {
   console.log(`[AdminRenewal] Admin token configured via setup (expires: ${new Date(payload.exp * 1000).toISOString()})`);
 }
 
-export async function checkAndRenew(): Promise<{ renewed: boolean; message: string }> {
+// Checks expiry and logs a warning if the token is within the threshold.
+// NOTE: IONOS does not allow token generation via API (requires web login with 2FA).
+// This only logs — it does not attempt any API call.
+function checkExpiry(): void {
   const state = db.getAdminTokenState();
-  if (!state) return { renewed: false, message: 'No admin token state found' };
-  if (!state.auto_renew_enabled) return { renewed: false, message: 'Auto-renewal is disabled' };
+  if (!state) return;
 
   const expiresAt = new Date(state.expires_at).getTime();
   const now = Date.now();
   const thresholdMs = state.renewal_threshold_seconds * 1000;
   const timeLeft = expiresAt - now;
+  const daysLeft = Math.floor(timeLeft / 86400000);
 
-  if (timeLeft > thresholdMs) {
-    const daysLeft = Math.floor(timeLeft / 86400000);
-    return { renewed: false, message: `Token still valid (${daysLeft} days remaining)` };
-  }
-
-  return await renewToken();
-}
-
-export async function renewToken(): Promise<{ renewed: boolean; message: string }> {
-  const state = db.getAdminTokenState();
-  if (!state) return { renewed: false, message: 'No admin token state found' };
-
-  try {
-    const currentToken = decrypt(state.current_token_enc);
-
-    // Generate new token
-    const newJwt = await ionosAuth.generateToken(state.renewal_ttl_seconds, currentToken);
-    const payload = decodeJwtPayload(newJwt);
-    const header = decodeJwtHeader(newJwt);
-    const newExpiresAt = new Date(payload.exp * 1000).toISOString();
-
-    // Update DB
-    db.updateAdminTokenRenewal({
-      currentTokenEnc: encrypt(newJwt),
-      tokenId: header.kid,
-      issuedAt: new Date(payload.iat * 1000).toISOString(),
-      expiresAt: newExpiresAt,
-      lastRenewalAt: new Date().toISOString(),
-      lastRenewalError: null,
-    });
-
-    // Update in-memory
-    config.setAdminToken(newJwt);
-
-    // Audit
-    db.insertAuditLog({
-      action: 'admin.renew',
-      entityType: 'admin',
-      details: { newTokenId: header.kid, expiresAt: newExpiresAt },
-    });
-
-    // Delete old token (non-critical)
-    if (state.token_id) {
-      try {
-        await ionosAuth.deleteToken(state.token_id, newJwt);
-      } catch {
-        // Old token will expire naturally
-      }
-    }
-
-    console.log(`[AdminRenewal] Token renewed successfully (new expiry: ${newExpiresAt})`);
-    return { renewed: true, message: `Token renewed, new expiry: ${newExpiresAt}` };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error(`[AdminRenewal] Renewal failed: ${message}`);
-
-    db.updateAdminTokenRenewal({ lastRenewalError: message });
-    db.insertAuditLog({
-      action: 'admin.renew',
-      entityType: 'admin',
-      success: false,
-      errorMessage: message,
-    });
-
-    return { renewed: false, message: `Renewal failed: ${message}` };
+  if (timeLeft <= 0) {
+    console.warn('[AdminRenewal] Admin token has EXPIRED. Log in to the IONOS console, generate a new token, and replace it via Settings.');
+  } else if (timeLeft <= thresholdMs) {
+    console.warn(`[AdminRenewal] Admin token expires in ${daysLeft} day(s). Log in to the IONOS console, generate a new token, and replace it via Settings.`);
   }
 }
 
 export function startAutoRenewal(): void {
-  // Check immediately
-  checkAndRenew().catch((err) => console.error('[AdminRenewal] Initial check failed:', err));
-  // Then periodically
-  intervalId = setInterval(() => {
-    checkAndRenew().catch((err) => console.error('[AdminRenewal] Check failed:', err));
-  }, CHECK_INTERVAL_MS);
-  console.log('[AdminRenewal] Auto-renewal started (checking every hour)');
+  // Check immediately on startup
+  checkExpiry();
+  // Then check periodically
+  intervalId = setInterval(checkExpiry, CHECK_INTERVAL_MS);
+  console.log('[AdminRenewal] Token expiry monitor started (checking every hour)');
 }
 
 export function stopAutoRenewal(): void {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    console.log('[AdminRenewal] Auto-renewal stopped');
+    console.log('[AdminRenewal] Token expiry monitor stopped');
   }
 }
 
@@ -171,18 +116,13 @@ export function getAdminTokenStatus(): {
   issuedAt: string | null;
   expiresAt: string | null;
   daysRemaining: number;
-  autoRenewEnabled: boolean;
-  renewalTtlSeconds: number;
-  renewalThresholdSeconds: number;
-  lastRenewalAt: string | null;
-  lastRenewalError: string | null;
+  lastUpdatedAt: string | null;
 } {
   const state = db.getAdminTokenState();
   if (!state) {
     return {
       tokenId: null, issuedAt: null, expiresAt: null, daysRemaining: 0,
-      autoRenewEnabled: false, renewalTtlSeconds: 2592000,
-      renewalThresholdSeconds: 604800, lastRenewalAt: null, lastRenewalError: null,
+      lastUpdatedAt: null,
     };
   }
 
@@ -194,10 +134,6 @@ export function getAdminTokenStatus(): {
     issuedAt: state.issued_at,
     expiresAt: state.expires_at,
     daysRemaining,
-    autoRenewEnabled: state.auto_renew_enabled === 1,
-    renewalTtlSeconds: state.renewal_ttl_seconds,
-    renewalThresholdSeconds: state.renewal_threshold_seconds,
-    lastRenewalAt: state.last_renewal_at,
-    lastRenewalError: state.last_renewal_error,
+    lastUpdatedAt: state.last_renewal_at,
   };
 }

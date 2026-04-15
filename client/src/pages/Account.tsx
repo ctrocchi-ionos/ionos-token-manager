@@ -14,7 +14,6 @@ import {
   RefreshCw,
   Settings,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
   ExternalLink,
   Key,
@@ -119,23 +118,6 @@ export default function Account() {
                         {adminUser.adminTokenStatus.daysRemaining} days remaining
                       </span>
                     </div>
-                    <div className="text-sm flex items-center gap-2">
-                      <span className="text-gray-500">Auto-renewal:</span>
-                      {adminUser.adminTokenStatus.autoRenewEnabled ? (
-                        <span className="flex items-center gap-1 text-green-600">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Enabled
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-gray-500">
-                          <XCircle className="w-3.5 h-3.5" /> Disabled
-                        </span>
-                      )}
-                    </div>
-                    {adminUser.adminTokenStatus.lastRenewalError && (
-                      <div className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
-                        Renewal error: {adminUser.adminTokenStatus.lastRenewalError}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
