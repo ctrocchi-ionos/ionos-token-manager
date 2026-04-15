@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { resolve, dirname } from 'path';
@@ -24,7 +24,11 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+// Skip global body parsing for /api/admin/restore — it sets its own higher limit
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/api/admin/restore') return next();
+  express.json({ limit: '1mb' })(req, res, next);
+});
 app.use(requestLogger);
 app.use(rateLimit({
   windowMs: 60000, // 1 minute
@@ -34,6 +38,27 @@ app.use(rateLimit({
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests' } },
 }));
 
+// Guard: block API routes that require a configured token, except setup endpoints
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  const allowedWhenUnconfigured = [
+    '/admin/needs-setup',
+    '/admin/setup',
+    '/admin/health',
+    '/admin/restore',
+  ];
+  if (!config.isConfigured && !allowedWhenUnconfigured.includes(req.path)) {
+    res.status(503).json({
+      success: false,
+      error: {
+        code: 'NOT_CONFIGURED',
+        message: 'App is not configured. Open the web interface to complete setup.',
+      },
+    });
+    return;
+  }
+  next();
+});
+
 // API Routes
 app.use('/api/tokens', tokenRoutes);
 app.use('/api/templates', templateRoutes);
@@ -42,12 +67,12 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/account', accountRoutes);
 
-// Serve frontend in production
-const clientDist = resolve(__dirname, '..', '..', 'client', 'dist');
-if (existsSync(clientDist)) {
-  app.use(express.static(clientDist));
+// Serve frontend static files from the public/ directory at project root
+const publicDir = process.env.PUBLIC_DIR || resolve(__dirname, '..', '..', 'public');
+if (existsSync(publicDir)) {
+  app.use(express.static(publicDir));
   app.get('*', (_req, res) => {
-    res.sendFile(resolve(clientDist, 'index.html'));
+    res.sendFile(resolve(publicDir, 'index.html'));
   });
 }
 
@@ -75,21 +100,30 @@ async function main() {
 
   // Start server
   app.listen(config.port, config.host, () => {
-    const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`;
-    console.log(`\n[Server] Listening on ${url}`);
-    console.log(`[Server] Admin token expires: ${config.tokenExpiresAt.toISOString()}`);
-    console.log(`[Server] Contract: ${config.contractNumber}`);
-    if (existsSync(clientDist)) {
-      console.log(`[Server] Serving frontend from ${clientDist}`);
+    const displayHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
+    const url = `http://${displayHost}:${config.port}`;
+    console.log(`\n[Server] Listening on http://${config.host}:${config.port}`);
+
+    if (config.isConfigured) {
+      console.log(`[Server] Admin token expires: ${config.tokenExpiresAt.toISOString()}`);
+      console.log(`[Server] Contract: ${config.contractNumber}`);
     } else {
-      console.log(`[Server] No frontend build found. Run 'npm run build -w client' to build.`);
+      console.log(`[Server] Not configured — open ${url} to complete setup`);
+    }
+
+    if (existsSync(publicDir)) {
+      console.log(`[Server] Serving frontend from ${publicDir}`);
+    } else {
+      console.log(`[Server] No frontend build found. Run 'npm run build' to build.`);
     }
     console.log('');
 
-    // Auto-open browser
-    const openCmd = process.platform === 'darwin' ? 'open' :
-                    process.platform === 'win32' ? 'start' : 'xdg-open';
-    exec(`${openCmd} ${url}`, () => {});
+    // Only auto-open browser in development
+    if (process.env.NODE_ENV === 'development') {
+      const openCmd = process.platform === 'darwin' ? 'open' :
+                      process.platform === 'win32' ? 'start' : 'xdg-open';
+      exec(`${openCmd} ${url}`, () => {});
+    }
   });
 }
 

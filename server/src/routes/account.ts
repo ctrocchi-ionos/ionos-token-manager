@@ -48,9 +48,7 @@ router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
             adminTokenStatus: {
               expiresAt: tokenStatus.expiresAt,
               daysRemaining: tokenStatus.daysRemaining,
-              autoRenewEnabled: tokenStatus.autoRenewEnabled,
-              lastRenewalAt: tokenStatus.lastRenewalAt,
-              lastRenewalError: tokenStatus.lastRenewalError,
+              lastUpdatedAt: tokenStatus.lastUpdatedAt,
             },
           }
         : managed

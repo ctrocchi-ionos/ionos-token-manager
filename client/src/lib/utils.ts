@@ -6,21 +6,31 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(date: string): string {
-  return format(new Date(date), 'MMM d, yyyy HH:mm');
+export function formatDate(date: string | null | undefined): string {
+  if (!date) return '—';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '—';
+  return format(d, 'MMM d, yyyy HH:mm');
 }
 
-export function timeUntil(date: string): string {
-  return formatDistanceToNow(new Date(date), { addSuffix: true });
+export function timeUntil(date: string | null | undefined): string {
+  if (!date) return '—';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '—';
+  return formatDistanceToNow(d, { addSuffix: true });
 }
 
-export function daysUntil(date: string): number {
-  return differenceInDays(new Date(date), new Date());
+export function daysUntil(date: string | null | undefined): number {
+  if (!date) return -1;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return -1;
+  return differenceInDays(d, new Date());
 }
 
 export type ExpiryStatus = 'healthy' | 'warning' | 'critical' | 'expired';
 
-export function getExpiryStatus(expiresAt: string): ExpiryStatus {
+export function getExpiryStatus(expiresAt: string | null | undefined): ExpiryStatus {
+  if (!expiresAt) return 'expired';
   const days = daysUntil(expiresAt);
   if (days < 0) return 'expired';
   if (days < 3) return 'critical';

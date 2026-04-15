@@ -214,26 +214,8 @@ export async function revokeManagedToken(id: string): Promise<void> {
 
   const errors: string[] = [];
 
-  // Delete the IONOS token if we have its ID
-  if (token.ionos_token_id) {
-    try {
-      // We need to delete the token using the admin token, not the sub-user's token
-      // But the token ID belongs to the sub-user. We need to auth as the sub-user.
-      const { decrypt } = await import('./crypto.js');
-      const password = decrypt(token.sub_user_password_enc);
-      // List sub-user's tokens and delete
-      try {
-        const subUserTokens = await ionosAuth.listTokens(undefined); // Can't list other user's tokens easily
-        // Try to delete by ID using admin auth
-        await ionosAuth.deleteToken(token.ionos_token_id);
-      } catch {
-        // Token may already be expired/deleted
-        errors.push('Could not delete IONOS token (may already be expired)');
-      }
-    } catch {
-      errors.push('Could not decrypt sub-user credentials');
-    }
-  }
+  // NOTE: IONOS Auth API requires web-based auth (not Bearer tokens) for token deletion.
+  // Deleting the sub-user below effectively invalidates their token on IONOS's side.
 
   // Cleanup sub-user and group if requested
   if (token.cleanup_on_delete) {

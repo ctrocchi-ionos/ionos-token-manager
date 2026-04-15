@@ -209,17 +209,24 @@ export interface AdminTokenStatus {
   issuedAt: string | null;
   expiresAt: string | null;
   daysRemaining: number;
-  autoRenewEnabled: boolean;
-  renewalTtlSeconds: number;
-  renewalThresholdSeconds: number;
-  lastRenewalAt: string | null;
-  lastRenewalError: string | null;
+  lastUpdatedAt: string | null;
 }
 
 export interface HealthInfo {
   status: string;
   tokenStatus: AdminTokenStatus;
   dbConnected: boolean;
+}
+
+export async function checkNeedsSetup() {
+  return request<{ needsSetup: boolean }>('/admin/needs-setup');
+}
+
+export async function submitSetup(token: string) {
+  return request<{ message: string }>('/admin/setup', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
 }
 
 export async function getHealth() {
@@ -230,20 +237,10 @@ export async function getAdminTokenStatus() {
   return request<AdminTokenStatus>('/admin/token-status');
 }
 
-export async function renewAdminToken() {
-  return request<{ renewed: boolean; message: string }>('/admin/token-renew', {
-    method: 'POST',
-  });
-}
-
-export async function updateAdminTokenConfig(config: {
-  renewalTtlSeconds?: number;
-  renewalThresholdSeconds?: number;
-  autoRenewEnabled?: boolean;
-}) {
-  return request<AdminTokenStatus>('/admin/token-config', {
+export async function updateAdminToken(token: string) {
+  return request<{ message: string }>('/admin/token', {
     method: 'PUT',
-    body: JSON.stringify(config),
+    body: JSON.stringify({ token }),
   });
 }
 
@@ -265,16 +262,14 @@ export interface AccountUser {
   adminTokenStatus?: {
     expiresAt: string | null;
     daysRemaining: number;
-    autoRenewEnabled: boolean;
-    lastRenewalAt: string | null;
-    lastRenewalError: string | null;
+    lastUpdatedAt: string | null;
   };
 }
 
 export interface OrphanToken {
   tokenId: string;
-  createdDate: string;
-  expirationDate: string;
+  createdDate: string | null;
+  expirationDate: string | null;
   expired: boolean;
 }
 
