@@ -25,7 +25,7 @@ export default function Account() {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<AccountUser | null>(null);
 
-  const { data: resp, isLoading } = useQuery({
+  const { data: resp, isLoading, isError, error } = useQuery({
     queryKey: ['accountUsers'],
     queryFn: () => getAccountUsers(),
     refetchInterval: 60000,
@@ -71,6 +71,15 @@ export default function Account() {
         <div className="flex items-center justify-center py-12">
           <RefreshCw className="w-5 h-5 animate-spin text-gray-400" />
           <span className="ml-2 text-gray-500">Loading account users...</span>
+        </div>
+      ) : isError ? (
+        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-sm">Failed to load account data</p>
+            <p className="text-xs mt-1 text-red-600">{error instanceof Error ? error.message : 'Unknown error'}</p>
+            <p className="text-xs mt-1 text-red-500">If you recently configured your API token, it may contain invalid characters. Go to Settings and reconfigure it.</p>
+          </div>
         </div>
       ) : (
         <>
@@ -315,10 +324,10 @@ export default function Account() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
-                          {formatDate(t.createdDate)}
+                          {t.createdDate ? formatDate(t.createdDate) : '—'}
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
-                          {formatDate(t.expirationDate)}
+                          {t.expirationDate ? formatDate(t.expirationDate) : '—'}
                         </td>
                       </tr>
                     ))}

@@ -1,14 +1,13 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { randomBytes } from 'crypto';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { IonosJwtPayload, IonosJwtHeader } from './types/ionos.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(__dirname, '..', '..');
 
 function loadEnv(): Record<string, string> {
-  const envPath = resolve(PROJECT_ROOT, '.env');
+  const envPath = resolve(__dirname, '..', '..', '.env');
   const env: Record<string, string> = {};
   if (existsSync(envPath)) {
     const content = readFileSync(envPath, 'utf-8');
@@ -25,14 +24,14 @@ function loadEnv(): Record<string, string> {
   return env;
 }
 
-function decodeJwtPayload(token: string): IonosJwtPayload {
+export function decodeJwtPayload(token: string): IonosJwtPayload {
   const parts = token.split('.');
   if (parts.length !== 3) throw new Error('Invalid JWT format');
   const payload = Buffer.from(parts[1], 'base64url').toString('utf-8');
   return JSON.parse(payload);
 }
 
-function decodeJwtHeader(token: string): IonosJwtHeader {
+export function decodeJwtHeader(token: string): IonosJwtHeader {
   const parts = token.split('.');
   if (parts.length !== 3) throw new Error('Invalid JWT format');
   const header = Buffer.from(parts[0], 'base64url').toString('utf-8');
@@ -40,72 +39,100 @@ function decodeJwtHeader(token: string): IonosJwtHeader {
 }
 
 class Config {
-  private adminToken: string;
-  private encryptionKey: string;
+  private _adminToken: string | null = null;
+  private encryptionKey: string = '';
   readonly port: number;
   readonly host: string;
   readonly dbPath: string;
+  readonly dataDir: string;
   readonly projectRoot: string;
-  readonly contractNumber: number;
-  readonly userId: string;
-  readonly tokenId: string;
-  readonly tokenIssuedAt: Date;
-  readonly tokenExpiresAt: Date;
+
+  // Populated when admin token is loaded — only valid when isConfigured === true
+  contractNumber: number = 0;
+  userId: string = '';
+  tokenId: string = '';
+  tokenIssuedAt: Date = new Date(0);
+  tokenExpiresAt: Date = new Date(0);
 
   constructor() {
     const env = loadEnv();
     const processEnv = { ...env, ...process.env };
 
-    // Admin token
-    this.adminToken = processEnv.IONOS_API_TOKEN || '';
-    if (!this.adminToken) {
-      throw new Error('IONOS_API_TOKEN is required in .env');
+    // Server config
+    this.port = parseInt(processEnv.PORT || '3000', 10);
+    this.host = processEnv.HOST || '0.0.0.0';
+    this.projectRoot = resolve(__dirname, '..', '..');
+
+    // Data directory — defaults to server/data/ locally; set DATA_DIR=/data (or similar) in containers
+    this.dataDir = processEnv.DATA_DIR || resolve(__dirname, '..', 'data');
+    this.dbPath = join(this.dataDir, 'tokenmanager.db');
+
+    // Ensure data directory exists before anything else writes to it
+    mkdirSync(this.dataDir, { recursive: true });
+
+    // Encryption key: env var > data volume file > auto-generate
+    const keyFile = join(this.dataDir, 'encryption.key');
+    this.encryptionKey = processEnv.ENCRYPTION_KEY || '';
+
+    if (!this.encryptionKey && existsSync(keyFile)) {
+      this.encryptionKey = readFileSync(keyFile, 'utf-8').trim();
     }
 
-    // Decode JWT to extract metadata
-    const payload = decodeJwtPayload(this.adminToken);
-    const header = decodeJwtHeader(this.adminToken);
+    if (!this.encryptionKey) {
+      this.encryptionKey = randomBytes(32).toString('hex');
+      writeFileSync(keyFile, this.encryptionKey, 'utf-8');
+      console.warn('\n' + '!'.repeat(60));
+      console.warn('  AUTO-GENERATED ENCRYPTION KEY');
+      console.warn(`  Saved to: ${keyFile}`);
+      console.warn('  BACK UP THIS FILE — losing it means losing access');
+      console.warn('  to all tokens stored in the database!');
+      console.warn('!'.repeat(60) + '\n');
+    }
+
+    if (this.encryptionKey.length !== 64) {
+      throw new Error('ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
+    }
+
+    // Admin token — optional at startup; can be configured via the setup page
+    const envToken = processEnv.IONOS_API_TOKEN || '';
+    if (envToken) {
+      try {
+        this.setAdminToken(envToken);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[Config] IONOS_API_TOKEN in environment is invalid: ${msg}`);
+      }
+    }
+  }
+
+  get isConfigured(): boolean {
+    return this._adminToken !== null;
+  }
+
+  getAdminToken(): string {
+    if (!this._adminToken) throw new Error('Admin token not configured');
+    return this._adminToken;
+  }
+
+  setAdminToken(token: string): void {
+    const payload = decodeJwtPayload(token);
+    const header = decodeJwtHeader(token);
+    this._adminToken = token;
     this.contractNumber = payload.identity.contractNumber;
     this.userId = payload.identity.uuid;
     this.tokenId = header.kid;
     this.tokenIssuedAt = new Date(payload.iat * 1000);
     this.tokenExpiresAt = new Date(payload.exp * 1000);
-
-    // Encryption key
-    this.encryptionKey = processEnv.ENCRYPTION_KEY || '';
-    if (!this.encryptionKey) {
-      console.log('No ENCRYPTION_KEY found. Generating one...');
-      this.encryptionKey = randomBytes(32).toString('hex');
-      // Append to .env file
-      const envPath = resolve(PROJECT_ROOT, '.env');
-      const existing = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
-      const newLine = existing.endsWith('\n') ? '' : '\n';
-      writeFileSync(envPath, `${existing}${newLine}ENCRYPTION_KEY=${this.encryptionKey}\n`);
-      console.log(`ENCRYPTION_KEY has been written to .env. Back up this key!`);
-    }
-    if (this.encryptionKey.length !== 64) {
-      throw new Error('ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
-    }
-
-    // Server config
-    this.port = parseInt(processEnv.PORT || '3001', 10);
-    this.host = processEnv.HOST || '127.0.0.1';
-    this.dbPath = resolve(__dirname, '..', 'data', 'tokenmanager.db');
-    this.projectRoot = PROJECT_ROOT;
-  }
-
-  getAdminToken(): string {
-    return this.adminToken;
-  }
-
-  setAdminToken(token: string): void {
-    this.adminToken = token;
   }
 
   getEncryptionKey(): Buffer {
     return Buffer.from(this.encryptionKey, 'hex');
   }
+
+  setEncryptionKey(hex: string): void {
+    if (hex.length !== 64) throw new Error('Encryption key must be 64 hex characters');
+    this.encryptionKey = hex;
+  }
 }
 
 export const config = new Config();
-export { decodeJwtPayload, decodeJwtHeader };

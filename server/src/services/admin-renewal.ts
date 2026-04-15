@@ -7,21 +7,28 @@ const CHECK_INTERVAL_MS = 3600000; // 1 hour
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
-export function bootstrapAdminToken(): void {
+export function bootstrapAdminToken(): boolean {
   const existing = db.getAdminTokenState();
   if (existing) {
-    // Load from DB (may be newer than .env)
+    // Load from DB (may be newer than env var)
     try {
       const storedToken = decrypt(existing.current_token_enc);
       config.setAdminToken(storedToken);
       console.log(`[AdminRenewal] Loaded admin token from DB (expires: ${existing.expires_at})`);
+      return true;
     } catch {
-      console.warn('[AdminRenewal] Could not decrypt stored token, using .env token');
+      console.warn('[AdminRenewal] Could not decrypt stored token — please reconfigure via the setup page');
+      return false;
     }
-    return;
   }
 
-  // First run: store the .env token in DB
+  // No DB entry — check if an env var token was loaded at startup
+  if (!config.isConfigured) {
+    console.log('[AdminRenewal] No admin token found — visit the app to complete setup');
+    return false;
+  }
+
+  // First run with env var: store it in DB
   const token = config.getAdminToken();
   const payload = decodeJwtPayload(token);
   const header = decodeJwtHeader(token);
@@ -33,7 +40,34 @@ export function bootstrapAdminToken(): void {
     expiresAt: new Date(payload.exp * 1000).toISOString(),
   });
 
-  console.log(`[AdminRenewal] Bootstrapped admin token from .env (expires: ${new Date(payload.exp * 1000).toISOString()})`);
+  console.log(`[AdminRenewal] Bootstrapped admin token from environment (expires: ${new Date(payload.exp * 1000).toISOString()})`);
+  return true;
+}
+
+export async function configureAdminToken(rawToken: string): Promise<void> {
+  // setAdminToken validates the JWT and updates in-memory config fields
+  config.setAdminToken(rawToken);
+
+  const payload = decodeJwtPayload(rawToken);
+  const header = decodeJwtHeader(rawToken);
+
+  db.upsertAdminTokenState({
+    currentTokenEnc: encrypt(rawToken),
+    tokenId: header.kid,
+    issuedAt: new Date(payload.iat * 1000).toISOString(),
+    expiresAt: new Date(payload.exp * 1000).toISOString(),
+  });
+
+  db.insertAuditLog({
+    action: 'admin.configure',
+    entityType: 'admin',
+    details: {
+      tokenId: header.kid,
+      expiresAt: new Date(payload.exp * 1000).toISOString(),
+    },
+  });
+
+  console.log(`[AdminRenewal] Admin token configured via setup (expires: ${new Date(payload.exp * 1000).toISOString()})`);
 }
 
 export async function checkAndRenew(): Promise<{ renewed: boolean; message: string }> {

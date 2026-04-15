@@ -222,6 +222,17 @@ export interface HealthInfo {
   dbConnected: boolean;
 }
 
+export async function checkNeedsSetup() {
+  return request<{ needsSetup: boolean }>('/admin/needs-setup');
+}
+
+export async function submitSetup(token: string) {
+  return request<{ message: string }>('/admin/setup', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
 export async function getHealth() {
   return request<HealthInfo>('/admin/health');
 }
@@ -233,6 +244,13 @@ export async function getAdminTokenStatus() {
 export async function renewAdminToken() {
   return request<{ renewed: boolean; message: string }>('/admin/token-renew', {
     method: 'POST',
+  });
+}
+
+export async function updateAdminToken(token: string) {
+  return request<{ message: string }>('/admin/token', {
+    method: 'PUT',
+    body: JSON.stringify({ token }),
   });
 }
 
@@ -273,8 +291,8 @@ export interface AccountUser {
 
 export interface OrphanToken {
   tokenId: string;
-  createdDate: string;
-  expirationDate: string;
+  createdDate: string | null;
+  expirationDate: string | null;
   expired: boolean;
 }
 

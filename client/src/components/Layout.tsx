@@ -29,7 +29,7 @@ export default function Layout() {
     refetchInterval: 60000,
   });
 
-  const adminDaysLeft = health?.data?.tokenStatus.daysRemaining ?? null;
+  const adminDaysLeft = health?.data?.tokenStatus?.daysRemaining ?? null;
   const adminWarning = adminDaysLeft !== null && adminDaysLeft < 7;
 
   return (
