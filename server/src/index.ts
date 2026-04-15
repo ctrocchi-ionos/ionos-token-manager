@@ -16,6 +16,7 @@ import templateRoutes from './routes/templates.js';
 import resourceRoutes from './routes/resources.js';
 import adminRoutes from './routes/admin.js';
 import auditRoutes from './routes/audit.js';
+import accountRoutes from './routes/account.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +40,7 @@ app.use('/api/templates', templateRoutes);
 app.use('/api/resources', resourceRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/account', accountRoutes);
 
 // Serve frontend in production
 const clientDist = resolve(__dirname, '..', '..', 'client', 'dist');

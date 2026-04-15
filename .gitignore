@@ -13,6 +13,8 @@ client/dist/
 # Database
 server/data/*.db
 server/data/*.db-journal
+server/data/*.db-shm
+server/data/*.db-wal
 
 # IDE
 .vscode/

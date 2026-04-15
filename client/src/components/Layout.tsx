@@ -10,6 +10,7 @@ import {
   Settings,
   Shield,
   AlertTriangle,
+  Users,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { to: '/tokens/new', label: 'Create Token', icon: Plus },
   { to: '/templates', label: 'Templates', icon: FileKey2 },
   { to: '/audit', label: 'Audit Log', icon: ScrollText },
+  { to: '/account', label: 'Account', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

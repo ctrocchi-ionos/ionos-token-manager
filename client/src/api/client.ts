@@ -247,6 +247,53 @@ export async function updateAdminTokenConfig(config: {
   });
 }
 
+// ── Account ──
+
+export interface AccountUser {
+  ionosUserId: string;
+  email: string;
+  firstname: string;
+  lastname: string;
+  admin: boolean;
+  active: boolean;
+  createdDate: string | null;
+  category: 'admin' | 'managed' | 'external';
+  managedTokenId?: string;
+  managedTokenName?: string;
+  managedTokenStatus?: string;
+  possiblyFormerManaged?: boolean;
+  adminTokenStatus?: {
+    expiresAt: string | null;
+    daysRemaining: number;
+    autoRenewEnabled: boolean;
+    lastRenewalAt: string | null;
+    lastRenewalError: string | null;
+  };
+}
+
+export interface OrphanToken {
+  tokenId: string;
+  createdDate: string;
+  expirationDate: string;
+  expired: boolean;
+}
+
+export interface AccountData {
+  contractNumber: number;
+  adminUserId: string;
+  users: AccountUser[];
+  summary: { total: number; admin: number; managed: number; external: number };
+  orphanTokens: OrphanToken[];
+}
+
+export async function getAccountUsers() {
+  return request<AccountData>('/account/users');
+}
+
+export async function deleteExternalUser(userId: string) {
+  return request<{ message: string }>(`/account/external-users/${userId}`, { method: 'DELETE' });
+}
+
 // ── Audit ──
 
 export interface AuditEntry {
