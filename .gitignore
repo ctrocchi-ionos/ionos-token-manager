@@ -4,17 +4,15 @@ node_modules/
 # Build output
 dist/
 client/dist/
+public/
 
 # Environment & secrets
 .env
 *.pem
 *.key
 
-# Database
-server/data/*.db
-server/data/*.db-journal
-server/data/*.db-shm
-server/data/*.db-wal
+# Runtime data (database, encryption key, backups)
+server/data/
 
 # IDE
 .vscode/
