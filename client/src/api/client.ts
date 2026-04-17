@@ -202,6 +202,12 @@ export async function listResources(type?: string) {
   return request<ResourceInfo[]>(type ? `/resources/${type}` : '/resources/all');
 }
 
+// ── Current User ──
+
+export async function getMe() {
+  return request<{ email: string }>('/me');
+}
+
 // ── Admin ──
 
 export interface AdminTokenStatus {

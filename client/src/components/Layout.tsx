@@ -1,6 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getHealth } from '@/api/client';
+import { getHealth, getMe } from '@/api/client';
 import { cn, daysUntil } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -11,6 +11,7 @@ import {
   Shield,
   AlertTriangle,
   Users,
+  CircleUser,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -27,6 +28,12 @@ export default function Layout() {
     queryKey: ['health'],
     queryFn: () => getHealth(),
     refetchInterval: 60000,
+  });
+
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => getMe(),
+    staleTime: Infinity,
   });
 
   const adminDaysLeft = health?.data?.tokenStatus?.daysRemaining ?? null;
@@ -67,8 +74,14 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Admin token status in sidebar footer */}
-        <div className="p-3 border-t border-gray-700">
+        {/* Sidebar footer: current user + admin token status */}
+        <div className="p-3 border-t border-gray-700 space-y-2">
+          {me?.data?.email && (
+            <div className="flex items-center gap-2 text-xs text-gray-400 truncate">
+              <CircleUser className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{me.data.email}</span>
+            </div>
+          )}
           {adminWarning ? (
             <div className="flex items-center gap-2 text-xs text-yellow-400">
               <AlertTriangle className="w-4 h-4" />
@@ -78,9 +91,7 @@ export default function Layout() {
             <div className="text-xs text-gray-500">
               Admin token: {adminDaysLeft}d remaining
             </div>
-          ) : (
-            <div className="text-xs text-gray-500">Loading...</div>
-          )}
+          ) : null}
         </div>
       </aside>
 

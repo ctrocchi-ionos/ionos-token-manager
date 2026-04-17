@@ -11,6 +11,7 @@ import { seedBuiltinTemplates } from './db/queries.js';
 import { bootstrapAdminToken, startAutoRenewal } from './services/admin-renewal.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
+import { ssoAuth } from './middleware/sso-auth.js';
 import tokenRoutes from './routes/tokens.js';
 import templateRoutes from './routes/templates.js';
 import resourceRoutes from './routes/resources.js';
@@ -38,6 +39,13 @@ app.use(rateLimit({
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests' } },
 }));
 
+// SSO auth: require X-Auth-Email on all API routes except platform health checks
+const SSO_EXEMPT = ['/admin/needs-setup', '/admin/setup', '/admin/health', '/admin/restore'];
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  if (SSO_EXEMPT.includes(req.path)) return next();
+  ssoAuth(req, res, next);
+});
+
 // Guard: block API routes that require a configured token, except setup endpoints
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   const allowedWhenUnconfigured = [
@@ -57,6 +65,11 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     return;
   }
   next();
+});
+
+// Current user identity
+app.get('/api/me', (req: Request, res: Response) => {
+  res.json({ success: true, data: { email: req.user.email } });
 });
 
 // API Routes

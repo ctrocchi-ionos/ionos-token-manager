@@ -53,6 +53,7 @@ export interface ManagedToken {
   expires_at: string;
   status: 'active' | 'expired' | 'revoked' | 'error';
   cleanup_on_delete: number;
+  owner_email: string;
 }
 
 // API response format for managed token
@@ -124,6 +125,7 @@ export interface AuditLogEntry {
   success: number;
   error_message: string | null;
   created_at: string;
+  actor_email: string | null;
 }
 
 export interface AuditLogResponse {
