@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import * as db from '../db/queries.js';
 import * as tokenCreator from '../services/token-creator.js';
+import { getAdminTokenFor } from '../services/user-token.js';
 import { ValidationError, NotFoundError } from '../middleware/error-handler.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 
@@ -32,7 +33,8 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     throw new ValidationError('Invalid request', parsed.error.flatten());
   }
 
-  const result = await tokenCreator.createManagedToken(parsed.data, req.user.email, req.user.email);
+  const adminToken = getAdminTokenFor(req.user.email);
+  const result = await tokenCreator.createManagedToken(parsed.data, req.user.email, req.user.email, adminToken);
   res.status(201).json({ success: true, data: result });
 }));
 
@@ -99,8 +101,9 @@ router.get('/export', (req: Request, res: Response) => {
 
 // Get single token
 router.get('/:id', (req: Request, res: Response) => {
-  const token = db.getManagedTokenById(req.params.id, req.user.email);
-  if (!token) throw new NotFoundError('Token', req.params.id);
+  const id = req.params.id as string;
+  const token = db.getManagedTokenById(id, req.user.email);
+  if (!token) throw new NotFoundError('Token', id);
 
   // Auto-mark expired
   if (token.status === 'active' && new Date(token.expires_at) <= new Date()) {
@@ -113,31 +116,36 @@ router.get('/:id', (req: Request, res: Response) => {
 
 // Regenerate token
 router.post('/:id/regenerate', asyncHandler(async (req: Request, res: Response) => {
-  const token = db.getManagedTokenById(req.params.id, req.user.email);
-  if (!token) throw new NotFoundError('Token', req.params.id);
+  const id = req.params.id as string;
+  const token = db.getManagedTokenById(id, req.user.email);
+  if (!token) throw new NotFoundError('Token', id);
 
-  const result = await tokenCreator.regenerateToken(req.params.id, req.user.email);
+  const adminToken = getAdminTokenFor(req.user.email);
+  const result = await tokenCreator.regenerateToken(id, req.user.email, adminToken);
   res.json({ success: true, data: result });
 }));
 
 // Revoke/delete token
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const token = db.getManagedTokenById(req.params.id, req.user.email);
-  if (!token) throw new NotFoundError('Token', req.params.id);
+  const id = req.params.id as string;
+  const token = db.getManagedTokenById(id, req.user.email);
+  if (!token) throw new NotFoundError('Token', id);
 
-  await tokenCreator.revokeManagedToken(req.params.id, req.user.email);
+  const adminToken = getAdminTokenFor(req.user.email);
+  await tokenCreator.revokeManagedToken(id, req.user.email, adminToken);
   res.json({ success: true, data: { message: 'Token revoked' } });
 }));
 
 // Remove from local DB (for revoked/expired tokens already cleaned up)
 router.delete('/:id/dismiss', asyncHandler((req: Request, res: Response) => {
-  const token = db.getManagedTokenById(req.params.id, req.user.email);
-  if (!token) throw new NotFoundError('Token', req.params.id);
+  const id = req.params.id as string;
+  const token = db.getManagedTokenById(id, req.user.email);
+  if (!token) throw new NotFoundError('Token', id);
   if (token.status !== 'revoked' && token.status !== 'expired') {
     throw new ValidationError('Only revoked or expired tokens can be dismissed. Revoke it first.');
   }
-  db.deleteManagedToken(req.params.id);
-  db.insertAuditLog({ action: 'token.dismiss', entityType: 'token', entityId: req.params.id, actorEmail: req.user.email });
+  db.deleteManagedToken(id);
+  db.insertAuditLog({ action: 'token.dismiss', entityType: 'token', entityId: id, actorEmail: req.user.email });
   res.json({ success: true, data: { message: 'Token removed from list' } });
 }));
 
@@ -161,10 +169,11 @@ router.post('/bulk-delete', asyncHandler(async (req: Request, res: Response) => 
 
   let deleted = 0;
   const errors: string[] = [];
+  const adminToken = getAdminTokenFor(req.user.email);
 
   for (const id of tokensToDelete) {
     try {
-      await tokenCreator.revokeManagedToken(id, req.user.email);
+      await tokenCreator.revokeManagedToken(id, req.user.email, adminToken);
       deleted++;
     } catch (err) {
       errors.push(`${id}: ${err instanceof Error ? err.message : 'unknown'}`);

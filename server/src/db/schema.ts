@@ -1,6 +1,6 @@
 import { getDb } from './connection.js';
 
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 4;
 
 const MIGRATIONS: Record<number, string[]> = {
   1: [
@@ -73,6 +73,19 @@ const MIGRATIONS: Record<number, string[]> = {
   3: [
     `ALTER TABLE audit_log ADD COLUMN actor_email TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_email)`,
+  ],
+  4: [
+    `CREATE TABLE IF NOT EXISTS user_admin_tokens (
+      owner_email TEXT PRIMARY KEY,
+      current_token_enc TEXT NOT NULL,
+      token_id TEXT,
+      issued_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `INSERT OR IGNORE INTO user_admin_tokens (owner_email, current_token_enc, token_id, issued_at, expires_at)
+      SELECT 'you@example.com', current_token_enc, token_id, issued_at, expires_at
+      FROM admin_token_state WHERE id = 1`,
   ],
 };
 

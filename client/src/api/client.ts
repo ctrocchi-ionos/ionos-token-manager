@@ -220,7 +220,6 @@ export interface AdminTokenStatus {
 
 export interface HealthInfo {
   status: string;
-  tokenStatus: AdminTokenStatus;
   dbConnected: boolean;
 }
 

@@ -8,7 +8,6 @@ import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { initializeDatabase } from './db/schema.js';
 import { seedBuiltinTemplates } from './db/queries.js';
-import { bootstrapAdminToken, startAutoRenewal } from './services/admin-renewal.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { ssoAuth } from './middleware/sso-auth.js';
@@ -40,31 +39,10 @@ app.use(rateLimit({
 }));
 
 // SSO auth: require X-Auth-Email on all API routes except platform health checks
-const SSO_EXEMPT = ['/admin/needs-setup', '/admin/setup', '/admin/health', '/admin/restore'];
+const SSO_EXEMPT = ['/admin/health', '/admin/restore'];
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (SSO_EXEMPT.includes(req.path)) return next();
   ssoAuth(req, res, next);
-});
-
-// Guard: block API routes that require a configured token, except setup endpoints
-app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-  const allowedWhenUnconfigured = [
-    '/admin/needs-setup',
-    '/admin/setup',
-    '/admin/health',
-    '/admin/restore',
-  ];
-  if (!config.isConfigured && !allowedWhenUnconfigured.includes(req.path)) {
-    res.status(503).json({
-      success: false,
-      error: {
-        code: 'NOT_CONFIGURED',
-        message: 'App is not configured. Open the web interface to complete setup.',
-      },
-    });
-    return;
-  }
-  next();
 });
 
 // Current user identity
@@ -103,26 +81,12 @@ async function main() {
   initializeDatabase();
   seedBuiltinTemplates();
 
-  // Admin token
-  console.log('[Init] Bootstrapping admin token...');
-  bootstrapAdminToken();
-
-  // Auto-renewal
-  console.log('[Init] Starting auto-renewal service...');
-  startAutoRenewal();
-
   // Start server
   app.listen(config.port, config.host, () => {
     const displayHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
     const url = `http://${displayHost}:${config.port}`;
     console.log(`\n[Server] Listening on http://${config.host}:${config.port}`);
-
-    if (config.isConfigured) {
-      console.log(`[Server] Admin token expires: ${config.tokenExpiresAt.toISOString()}`);
-      console.log(`[Server] Contract: ${config.contractNumber}`);
-    } else {
-      console.log(`[Server] Not configured — open ${url} to complete setup`);
-    }
+    console.log(`[Server] Each user must configure their own IONOS token via ${url}/settings`);
 
     if (existsSync(publicDir)) {
       console.log(`[Server] Serving frontend from ${publicDir}`);

@@ -39,7 +39,6 @@ export function decodeJwtHeader(token: string): IonosJwtHeader {
 }
 
 class Config {
-  private _adminToken: string | null = null;
   private encryptionKey: string = '';
   readonly port: number;
   readonly host: string;
@@ -47,30 +46,19 @@ class Config {
   readonly dataDir: string;
   readonly projectRoot: string;
 
-  // Populated when admin token is loaded — only valid when isConfigured === true
-  contractNumber: number = 0;
-  userId: string = '';
-  tokenId: string = '';
-  tokenIssuedAt: Date = new Date(0);
-  tokenExpiresAt: Date = new Date(0);
-
   constructor() {
     const env = loadEnv();
     const processEnv = { ...env, ...process.env };
 
-    // Server config
     this.port = parseInt(processEnv.PORT || '3000', 10);
     this.host = processEnv.HOST || '0.0.0.0';
     this.projectRoot = resolve(__dirname, '..', '..');
 
-    // Data directory — defaults to server/data/ locally; set DATA_DIR=/data (or similar) in containers
     this.dataDir = processEnv.DATA_DIR || resolve(__dirname, '..', 'data');
     this.dbPath = join(this.dataDir, 'tokenmanager.db');
 
-    // Ensure data directory exists before anything else writes to it
     mkdirSync(this.dataDir, { recursive: true });
 
-    // Encryption key: env var > data volume file > auto-generate
     const keyFile = join(this.dataDir, 'encryption.key');
     this.encryptionKey = processEnv.ENCRYPTION_KEY || '';
 
@@ -92,37 +80,6 @@ class Config {
     if (this.encryptionKey.length !== 64) {
       throw new Error('ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
     }
-
-    // Admin token — optional at startup; can be configured via the setup page
-    const envToken = processEnv.IONOS_API_TOKEN || '';
-    if (envToken) {
-      try {
-        this.setAdminToken(envToken);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[Config] IONOS_API_TOKEN in environment is invalid: ${msg}`);
-      }
-    }
-  }
-
-  get isConfigured(): boolean {
-    return this._adminToken !== null;
-  }
-
-  getAdminToken(): string {
-    if (!this._adminToken) throw new Error('Admin token not configured');
-    return this._adminToken;
-  }
-
-  setAdminToken(token: string): void {
-    const payload = decodeJwtPayload(token);
-    const header = decodeJwtHeader(token);
-    this._adminToken = token;
-    this.contractNumber = payload.identity.contractNumber;
-    this.userId = payload.identity.uuid;
-    this.tokenId = header.kid;
-    this.tokenIssuedAt = new Date(payload.iat * 1000);
-    this.tokenExpiresAt = new Date(payload.exp * 1000);
   }
 
   getEncryptionKey(): Buffer {

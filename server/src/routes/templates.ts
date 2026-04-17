@@ -47,25 +47,27 @@ router.post('/', (req: Request, res: Response) => {
 
 // Update template
 router.put('/:id', (req: Request, res: Response) => {
-  const existing = db.getPermissionTemplateById(req.params.id);
-  if (!existing) throw new NotFoundError('Template', req.params.id);
+  const id = req.params.id as string;
+  const existing = db.getPermissionTemplateById(id);
+  if (!existing) throw new NotFoundError('Template', id);
   if (existing.is_builtin) throw new ValidationError('Cannot modify built-in templates');
 
   const parsed = createTemplateSchema.partial().safeParse(req.body);
   if (!parsed.success) throw new ValidationError('Invalid request', parsed.error.flatten());
 
-  db.updatePermissionTemplate(req.params.id, parsed.data);
-  const updated = db.getPermissionTemplateById(req.params.id)!;
+  db.updatePermissionTemplate(id, parsed.data);
+  const updated = db.getPermissionTemplateById(id)!;
   res.json({ success: true, data: templateToResponse(updated) });
 });
 
 // Delete template
 router.delete('/:id', (req: Request, res: Response) => {
-  const existing = db.getPermissionTemplateById(req.params.id);
-  if (!existing) throw new NotFoundError('Template', req.params.id);
+  const id = req.params.id as string;
+  const existing = db.getPermissionTemplateById(id);
+  if (!existing) throw new NotFoundError('Template', id);
   if (existing.is_builtin) throw new ValidationError('Cannot delete built-in templates');
 
-  db.deletePermissionTemplate(req.params.id);
+  db.deletePermissionTemplate(id);
   res.json({ success: true, data: { message: 'Template deleted' } });
 });
 

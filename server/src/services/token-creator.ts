@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
-import { config, decodeJwtHeader, decodeJwtPayload } from '../config.js';
+import { decodeJwtHeader, decodeJwtPayload } from '../config.js';
 import { encrypt } from './crypto.js';
 import * as ionosAuth from './ionos-auth.js';
 import * as ionosCloud from './ionos-cloud.js';
@@ -37,13 +37,14 @@ function generatePassword(): string {
   return Array.from(bytes).map((b) => chars[b % chars.length]).join('');
 }
 
-export async function createManagedToken(req: CreateTokenRequest, ownerEmail: string, actorEmail: string): Promise<CreateTokenResult> {
+export async function createManagedToken(req: CreateTokenRequest, ownerEmail: string, actorEmail: string, adminToken: string): Promise<CreateTokenResult> {
   const rollback = new Rollback();
   const internalId = uuidv4();
   const shortId = internalId.slice(0, 8);
 
   // Step 1: Generate credentials
-  const email = `tkn-${shortId}@c${config.contractNumber}.tokenmanager.internal`;
+  const contractNumber = decodeJwtPayload(adminToken).identity.contractNumber;
+  const email = `tkn-${shortId}@c${contractNumber}.tokenmanager.internal`;
   const password = generatePassword();
 
   let ionosUserId = '';
@@ -54,31 +55,32 @@ export async function createManagedToken(req: CreateTokenRequest, ownerEmail: st
   try {
     // Step 2: Create sub-user
     console.log(`[TokenCreator] Step 2: Creating sub-user ${email}`);
-    const user = await ionosCloud.createUser({
+    const user = await ionosCloud.createUser(adminToken, {
       firstname: 'TokenMgr',
       lastname: req.name.slice(0, 50),
       email,
       password,
     });
     ionosUserId = user.id;
-    rollback.add('delete-user', () => ionosCloud.deleteUser(ionosUserId));
+    rollback.add('delete-user', () => ionosCloud.deleteUser(adminToken, ionosUserId));
 
     // Step 3: Create group with permissions
     const groupName = `tkn-${req.name.slice(0, 30).replace(/[^a-zA-Z0-9-_ ]/g, '')}-${shortId}`;
     console.log(`[TokenCreator] Step 3: Creating group ${groupName}`);
-    const group = await ionosCloud.createGroup(groupName, req.permissions);
+    const group = await ionosCloud.createGroup(adminToken, groupName, req.permissions);
     ionosGroupId = group.id;
-    rollback.add('delete-group', () => ionosCloud.deleteGroup(ionosGroupId));
+    rollback.add('delete-group', () => ionosCloud.deleteGroup(adminToken, ionosGroupId));
 
     // Step 4: Add user to group
     console.log(`[TokenCreator] Step 4: Adding user to group`);
-    await ionosCloud.addUserToGroup(ionosGroupId, ionosUserId);
+    await ionosCloud.addUserToGroup(adminToken, ionosGroupId, ionosUserId);
 
     // Step 5: Share resources (if any)
     if (req.sharedResources && req.sharedResources.length > 0) {
       console.log(`[TokenCreator] Step 5: Sharing ${req.sharedResources.length} resources`);
       for (const resource of req.sharedResources) {
         await ionosCloud.shareResourceWithGroup(
+          adminToken,
           ionosGroupId,
           resource.resourceId,
           resource.editPrivilege,
@@ -179,7 +181,7 @@ export async function createManagedToken(req: CreateTokenRequest, ownerEmail: st
   }
 }
 
-export async function regenerateToken(id: string, actorEmail: string): Promise<{ tokenValue: string; expiresAt: string }> {
+export async function regenerateToken(id: string, actorEmail: string, adminToken: string): Promise<{ tokenValue: string; expiresAt: string }> {
   const token = db.getManagedTokenById(id);
   if (!token) throw new Error(`Token not found: ${id}`);
 
@@ -212,7 +214,7 @@ export async function regenerateToken(id: string, actorEmail: string): Promise<{
   return { tokenValue: tokenJwt, expiresAt };
 }
 
-export async function revokeManagedToken(id: string, actorEmail: string): Promise<void> {
+export async function revokeManagedToken(id: string, actorEmail: string, adminToken: string): Promise<void> {
   const token = db.getManagedTokenById(id);
   if (!token) throw new Error(`Token not found: ${id}`);
 
@@ -224,13 +226,13 @@ export async function revokeManagedToken(id: string, actorEmail: string): Promis
   // Cleanup sub-user and group if requested
   if (token.cleanup_on_delete) {
     try {
-      await ionosCloud.deleteUser(token.ionos_user_id);
+      await ionosCloud.deleteUser(adminToken, token.ionos_user_id);
     } catch (err) {
       errors.push(`Could not delete sub-user: ${err instanceof Error ? err.message : 'unknown'}`);
     }
 
     try {
-      await ionosCloud.deleteGroup(token.ionos_group_id);
+      await ionosCloud.deleteGroup(adminToken, token.ionos_group_id);
     } catch (err) {
       errors.push(`Could not delete group: ${err instanceof Error ? err.message : 'unknown'}`);
     }

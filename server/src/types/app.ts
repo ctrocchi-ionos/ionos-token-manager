@@ -140,6 +140,16 @@ export interface AuditLogResponse {
   createdAt: string;
 }
 
+// Per-user IONOS admin token
+export interface UserAdminToken {
+  owner_email: string;
+  current_token_enc: string;
+  token_id: string | null;
+  issued_at: string;
+  expires_at: string;
+  updated_at: string;
+}
+
 // Admin token state
 export interface AdminTokenState {
   id: number;

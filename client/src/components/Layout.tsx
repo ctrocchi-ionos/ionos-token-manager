@@ -1,7 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getHealth, getMe } from '@/api/client';
-import { cn, daysUntil } from '@/lib/utils';
+import { getAdminTokenStatus, getMe } from '@/api/client';
+import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
   Plus,
@@ -24,9 +24,9 @@ const NAV_ITEMS = [
 ];
 
 export default function Layout() {
-  const { data: health } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => getHealth(),
+  const { data: tokenStatus } = useQuery({
+    queryKey: ['admin-token-status'],
+    queryFn: () => getAdminTokenStatus(),
     refetchInterval: 60000,
   });
 
@@ -36,7 +36,7 @@ export default function Layout() {
     staleTime: Infinity,
   });
 
-  const adminDaysLeft = health?.data?.tokenStatus?.daysRemaining ?? null;
+  const adminDaysLeft = tokenStatus?.data?.daysRemaining ?? null;
   const adminWarning = adminDaysLeft !== null && adminDaysLeft < 7;
 
   return (

@@ -2,6 +2,7 @@ import express, { Router, type Request, type Response } from 'express';
 import { writeFileSync, unlinkSync } from 'fs';
 import { config } from '../config.js';
 import * as adminRenewal from '../services/admin-renewal.js';
+import { isConfiguredFor } from '../services/user-token.js';
 import { backupDatabase, replaceDatabase } from '../db/connection.js';
 import * as db from '../db/queries.js';
 import { asyncHandler } from '../middleware/async-handler.js';
@@ -9,21 +10,13 @@ import { join } from 'path';
 
 const router = Router();
 
-// Setup check — always available, even before the app is configured
-router.get('/needs-setup', (_req: Request, res: Response) => {
-  res.json({ success: true, data: { needsSetup: !config.isConfigured } });
+// Setup check — per-user: requires authentication
+router.get('/needs-setup', (req: Request, res: Response) => {
+  res.json({ success: true, data: { needsSetup: !isConfiguredFor(req.user.email) } });
 });
 
-// Initial setup — stores the IONOS admin token for the first time
+// Initial setup — stores the IONOS admin token for this user
 router.post('/setup', asyncHandler(async (req: Request, res: Response) => {
-  if (config.isConfigured) {
-    res.status(400).json({
-      success: false,
-      error: { code: 'ALREADY_CONFIGURED', message: 'Admin token is already configured' },
-    });
-    return;
-  }
-
   const { token } = req.body ?? {};
   if (!token || typeof token !== 'string' || token.trim() === '') {
     res.status(400).json({
@@ -33,7 +26,7 @@ router.post('/setup', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  await adminRenewal.configureAdminToken(token.replace(/\s+/g, ''));
+  await adminRenewal.configureAdminToken(token.replace(/\s+/g, ''), req.user.email);
   res.json({ success: true, data: { message: 'Admin token configured successfully' } });
 }));
 
@@ -44,28 +37,26 @@ router.put('/token', asyncHandler(async (req: Request, res: Response) => {
     res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'token is required' } });
     return;
   }
-  await adminRenewal.configureAdminToken(token.replace(/\s+/g, ''));
+  await adminRenewal.configureAdminToken(token.replace(/\s+/g, ''), req.user.email);
   res.json({ success: true, data: { message: 'Admin token updated successfully' } });
 }));
 
-// Health check
+// Health check — generic, no token details (SSO-exempt endpoint)
 router.get('/health', (_req: Request, res: Response) => {
-  const tokenStatus = adminRenewal.getAdminTokenStatus();
   res.json({
     success: true,
     data: {
       status: 'ok',
-      tokenStatus,
       dbConnected: true,
     },
   });
 });
 
-// Get admin token status
-router.get('/token-status', (_req: Request, res: Response) => {
+// Get admin token status — per-user
+router.get('/token-status', (req: Request, res: Response) => {
   res.json({
     success: true,
-    data: adminRenewal.getAdminTokenStatus(),
+    data: adminRenewal.getAdminTokenStatus(req.user.email),
   });
 });
 
@@ -113,26 +104,13 @@ router.post('/restore',
     const dbBuffer = Buffer.from(dbBase64, 'base64');
     replaceDatabase(dbBuffer);
 
-    // Reload admin token from the restored DB using the (possibly new) encryption key
-    const tokenLoaded = adminRenewal.bootstrapAdminToken();
-    if (!tokenLoaded) {
-      res.status(500).json({
-        success: false,
-        error: {
-          code: 'RESTORE_INCOMPLETE',
-          message: 'Database restored but the admin token could not be decrypted. Reconfigure the token via the setup page.',
-        },
-      });
-      return;
-    }
-
     db.insertAuditLog({ action: 'admin.restore', entityType: 'admin', details: { hasKey: !!key } });
 
     const warning = key && process.env.ENCRYPTION_KEY
       ? 'ENCRYPTION_KEY env var is set — the restored key file will be ignored on next restart. Update the env var to match the backup key.'
       : undefined;
 
-    res.json({ success: true, data: { message: 'Database restored successfully. Reload the page.', ...(warning && { warning }) } });
+    res.json({ success: true, data: { message: 'Database restored successfully. Reconfigure your IONOS token if needed. Reload the page.', ...(warning && { warning }) } });
   })
 );
 

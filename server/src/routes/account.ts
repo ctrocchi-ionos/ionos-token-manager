@@ -3,19 +3,26 @@ import * as ionosCloud from '../services/ionos-cloud.js';
 import * as ionosAuth from '../services/ionos-auth.js';
 import * as adminRenewal from '../services/admin-renewal.js';
 import * as db from '../db/queries.js';
-import { config } from '../config.js';
+import { decodeJwtPayload } from '../config.js';
+import { getAdminTokenFor } from '../services/user-token.js';
 import { AppError } from '../middleware/error-handler.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 
 const router = Router();
 
 // List all IONOS sub-users, classified as admin / managed / external
-router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
-  const [ionosUsers, ionosTokens, managedResult, tokenStatus] = await Promise.all([
-    ionosCloud.listUsers(),
-    ionosAuth.listTokens(),
-    Promise.resolve(db.listManagedTokens({ limit: 100000 })),
-    Promise.resolve(adminRenewal.getAdminTokenStatus()),
+router.get('/users', asyncHandler(async (req: Request, res: Response) => {
+  const adminToken = getAdminTokenFor(req.user.email);
+  const payload = decodeJwtPayload(adminToken);
+  const adminUserId = payload.identity.uuid;
+  const contractNumber = payload.identity.contractNumber;
+
+  const tokenStatus = adminRenewal.getAdminTokenStatus(req.user.email);
+
+  const [ionosUsers, ionosTokens, managedResult] = await Promise.all([
+    ionosCloud.listUsers(adminToken),
+    ionosAuth.listTokens(adminToken),
+    Promise.resolve(db.listManagedTokens({ limit: 100000, ownerEmail: req.user.email })),
   ]);
 
   // Build lookup: ionos_user_id -> managed token info
@@ -31,7 +38,7 @@ router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
   const emailPattern = /^tkn-.*@c\d+\.tokenmanager\.internal$/;
 
   const users = ionosUsers.map((u) => {
-    const isAdmin = u.id === config.userId;
+    const isAdmin = u.id === adminUserId;
     const managed = managedByUserId.get(u.id);
 
     return {
@@ -94,8 +101,8 @@ router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
   res.json({
     success: true,
     data: {
-      contractNumber: config.contractNumber,
-      adminUserId: config.userId,
+      contractNumber,
+      adminUserId,
       users,
       summary,
       orphanTokens,
@@ -105,14 +112,16 @@ router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
 
 // Delete an external (unmanaged) user from IONOS
 router.delete('/external-users/:userId', asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.params;
+  const userId = req.params.userId as string;
+  const adminToken = getAdminTokenFor(req.user.email);
+  const payload = decodeJwtPayload(adminToken);
 
-  if (userId === config.userId) {
+  if (userId === payload.identity.uuid) {
     throw new AppError('Cannot delete the admin user', 'FORBIDDEN', 403);
   }
 
   // Check if this user is managed by the tool
-  const managed = db.listManagedTokens({ limit: 100000 });
+  const managed = db.listManagedTokens({ limit: 100000, ownerEmail: req.user.email });
   const isManaged = managed.items.some((t) => t.ionos_user_id === userId);
   if (isManaged) {
     throw new AppError(
@@ -122,8 +131,8 @@ router.delete('/external-users/:userId', asyncHandler(async (req: Request, res: 
     );
   }
 
-  await ionosCloud.deleteUser(userId);
-  db.insertAuditLog({ action: 'account.delete_external_user', entityType: 'user', entityId: userId });
+  await ionosCloud.deleteUser(adminToken, userId);
+  db.insertAuditLog({ action: 'account.delete_external_user', entityType: 'user', entityId: userId, actorEmail: req.user.email });
 
   res.json({ success: true, data: { message: 'User deleted from IONOS' } });
 }));

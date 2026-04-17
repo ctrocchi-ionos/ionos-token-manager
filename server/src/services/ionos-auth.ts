@@ -1,5 +1,4 @@
 import axios, { type AxiosInstance } from 'axios';
-import { config } from '../config.js';
 import type { IonosTokenListResponse, IonosToken } from '../types/ionos.js';
 
 const AUTH_BASE = 'https://api.ionos.com/auth/v1';
@@ -12,8 +11,8 @@ function createClient(): AxiosInstance {
   });
 }
 
-function authHeaders(token?: string) {
-  return { Authorization: `Bearer ${token ?? config.getAdminToken()}` };
+function authHeaders(adminToken: string) {
+  return { Authorization: `Bearer ${adminToken}` };
 }
 
 function basicAuthHeaders(email: string, password: string) {
@@ -21,43 +20,42 @@ function basicAuthHeaders(email: string, password: string) {
   return { Authorization: `Basic ${encoded}` };
 }
 
-export async function listTokens(token?: string): Promise<IonosToken[]> {
+export async function listTokens(adminToken: string): Promise<IonosToken[]> {
   const client = createClient();
   const resp = await client.get<IonosTokenListResponse>('/tokens', {
-    headers: authHeaders(token),
+    headers: authHeaders(adminToken),
   });
   return resp.data.tokens ?? [];
 }
 
-export async function getToken(tokenId: string, token?: string): Promise<IonosToken> {
+export async function getToken(adminToken: string, tokenId: string): Promise<IonosToken> {
   const client = createClient();
   const resp = await client.get<IonosToken>(`/tokens/${tokenId}`, {
-    headers: authHeaders(token),
+    headers: authHeaders(adminToken),
   });
   return resp.data;
 }
 
-export async function deleteToken(tokenId: string, token?: string): Promise<void> {
+export async function deleteToken(adminToken: string, tokenId: string): Promise<void> {
   const client = createClient();
   await client.delete(`/tokens/${tokenId}`, {
-    headers: authHeaders(token),
+    headers: authHeaders(adminToken),
   });
 }
 
-export async function deleteTokensByCriteria(criteria: 'EXPIRED' | 'ALL' | 'CURRENT', token?: string): Promise<void> {
+export async function deleteTokensByCriteria(adminToken: string, criteria: 'EXPIRED' | 'ALL' | 'CURRENT'): Promise<void> {
   const client = createClient();
   await client.delete(`/tokens?criteria=${criteria}`, {
-    headers: authHeaders(token),
+    headers: authHeaders(adminToken),
   });
 }
 
-export async function generateToken(ttlSeconds: number, token?: string): Promise<string> {
+export async function generateToken(adminToken: string, ttlSeconds: number): Promise<string> {
   const client = createClient();
   const resp = await client.get('/tokens/generate', {
     params: { ttl: ttlSeconds },
-    headers: authHeaders(token),
+    headers: authHeaders(adminToken),
   });
-  // The response could be { token: "..." } or just the JWT string
   if (typeof resp.data === 'string') return resp.data;
   if (resp.data.token) return resp.data.token;
   throw new Error('Unexpected token generate response format');
@@ -82,7 +80,6 @@ export async function generateTokenAsUser(
       throw new Error('Unexpected token generate response format');
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.status === 401 && attempt < maxRetries - 1) {
-        // User may not have propagated yet — wait and retry
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }

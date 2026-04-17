@@ -5,6 +5,7 @@ import type {
   PermissionTemplate,
   AuditLogEntry,
   AdminTokenState,
+  UserAdminToken,
   PermissionFlags,
 } from '../types/app.js';
 
@@ -238,6 +239,32 @@ export function listAuditLog(filters?: {
   ).all(...params, limit, offset) as AuditLogEntry[];
 
   return { items, total };
+}
+
+// ── Per-User Admin Tokens ──
+
+export function getUserAdminToken(ownerEmail: string): UserAdminToken | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM user_admin_tokens WHERE owner_email = ?').get(ownerEmail) as UserAdminToken | undefined;
+}
+
+export function upsertUserAdminToken(ownerEmail: string, fields: {
+  currentTokenEnc: string;
+  tokenId: string;
+  issuedAt: string;
+  expiresAt: string;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO user_admin_tokens (owner_email, current_token_enc, token_id, issued_at, expires_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(owner_email) DO UPDATE SET
+      current_token_enc = excluded.current_token_enc,
+      token_id = excluded.token_id,
+      issued_at = excluded.issued_at,
+      expires_at = excluded.expires_at,
+      updated_at = datetime('now')
+  `).run(ownerEmail, fields.currentTokenEnc, fields.tokenId, fields.issuedAt, fields.expiresAt);
 }
 
 // ── Admin Token State ──

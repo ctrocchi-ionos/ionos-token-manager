@@ -1,12 +1,14 @@
 import { Router, type Request, type Response } from 'express';
 import * as ionosCloud from '../services/ionos-cloud.js';
+import { getAdminTokenFor } from '../services/user-token.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 
 const router = Router();
 
 // List datacenters
-router.get('/datacenters', asyncHandler(async (_req: Request, res: Response) => {
-  const datacenters = await ionosCloud.listDatacenters();
+router.get('/datacenters', asyncHandler(async (req: Request, res: Response) => {
+  const adminToken = getAdminTokenFor(req.user.email);
+  const datacenters = await ionosCloud.listDatacenters(adminToken);
   const simplified = datacenters.map((dc) => ({
     id: dc.id,
     name: dc.properties.name,
@@ -17,8 +19,9 @@ router.get('/datacenters', asyncHandler(async (_req: Request, res: Response) => 
 }));
 
 // List all resources
-router.get('/all', asyncHandler(async (_req: Request, res: Response) => {
-  const resources = await ionosCloud.listAllResources();
+router.get('/all', asyncHandler(async (req: Request, res: Response) => {
+  const adminToken = getAdminTokenFor(req.user.email);
+  const resources = await ionosCloud.listAllResources(adminToken);
   const simplified = resources.map((r) => ({
     id: r.id,
     type: r.type,
@@ -29,7 +32,8 @@ router.get('/all', asyncHandler(async (_req: Request, res: Response) => {
 
 // List resources by type
 router.get('/:type', asyncHandler(async (req: Request, res: Response) => {
-  const resources = await ionosCloud.listResourcesByType(req.params.type);
+  const adminToken = getAdminTokenFor(req.user.email);
+  const resources = await ionosCloud.listResourcesByType(adminToken, req.params.type as string);
   const simplified = resources.map((r) => ({
     id: r.id,
     type: r.type,
