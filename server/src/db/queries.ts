@@ -15,19 +15,22 @@ export function insertManagedToken(token: Omit<ManagedToken, 'created_at'>): voi
   db.prepare(`
     INSERT INTO managed_tokens (id, name, description, ionos_token_id, ionos_user_id, ionos_group_id,
       sub_user_email, sub_user_password_enc, permissions, shared_resources, template_id,
-      ttl_seconds, expires_at, status, cleanup_on_delete)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ttl_seconds, expires_at, status, cleanup_on_delete, owner_email)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     token.id, token.name, token.description, token.ionos_token_id,
     token.ionos_user_id, token.ionos_group_id, token.sub_user_email,
     token.sub_user_password_enc, token.permissions, token.shared_resources,
     token.template_id, token.ttl_seconds, token.expires_at, token.status,
-    token.cleanup_on_delete,
+    token.cleanup_on_delete, token.owner_email,
   );
 }
 
-export function getManagedTokenById(id: string): ManagedToken | undefined {
+export function getManagedTokenById(id: string, ownerEmail?: string): ManagedToken | undefined {
   const db = getDb();
+  if (ownerEmail) {
+    return db.prepare('SELECT * FROM managed_tokens WHERE id = ? AND owner_email = ?').get(id, ownerEmail) as ManagedToken | undefined;
+  }
   return db.prepare('SELECT * FROM managed_tokens WHERE id = ?').get(id) as ManagedToken | undefined;
 }
 
@@ -36,10 +39,16 @@ export function listManagedTokens(filters?: {
   search?: string;
   page?: number;
   limit?: number;
+  ownerEmail?: string;
 }): { items: ManagedToken[]; total: number } {
   const db = getDb();
   const conditions: string[] = [];
   const params: unknown[] = [];
+
+  if (filters?.ownerEmail) {
+    conditions.push('owner_email = ?');
+    params.push(filters.ownerEmail);
+  }
 
   if (filters?.status && filters.status !== 'all') {
     if (filters.status === 'expiring_soon') {
@@ -85,20 +94,25 @@ export function deleteManagedToken(id: string): void {
   db.prepare('DELETE FROM managed_tokens WHERE id = ?').run(id);
 }
 
-export function getExpiredTokens(): ManagedToken[] {
+export function getExpiredTokens(ownerEmail?: string): ManagedToken[] {
   const db = getDb();
+  if (ownerEmail) {
+    return db.prepare(
+      "SELECT * FROM managed_tokens WHERE status = 'active' AND datetime(expires_at) <= datetime('now') AND owner_email = ?"
+    ).all(ownerEmail) as ManagedToken[];
+  }
   return db.prepare(
     "SELECT * FROM managed_tokens WHERE status = 'active' AND datetime(expires_at) <= datetime('now')"
   ).all() as ManagedToken[];
 }
 
-export function getTokenStats(): { active: number; expiringSoon: number; expired: number; revoked: number; total: number } {
+export function getTokenStats(ownerEmail: string): { active: number; expiringSoon: number; expired: number; revoked: number; total: number } {
   const db = getDb();
-  const active = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'active' AND datetime(expires_at) > datetime('now', '+7 days')").get() as { c: number }).c;
-  const expiringSoon = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'active' AND datetime(expires_at) <= datetime('now', '+7 days') AND datetime(expires_at) > datetime('now')").get() as { c: number }).c;
-  const expired = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'expired'").get() as { c: number }).c;
-  const revoked = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'revoked'").get() as { c: number }).c;
-  const total = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens").get() as { c: number }).c;
+  const active = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'active' AND datetime(expires_at) > datetime('now', '+7 days') AND owner_email = ?").get(ownerEmail) as { c: number }).c;
+  const expiringSoon = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'active' AND datetime(expires_at) <= datetime('now', '+7 days') AND datetime(expires_at) > datetime('now') AND owner_email = ?").get(ownerEmail) as { c: number }).c;
+  const expired = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'expired' AND owner_email = ?").get(ownerEmail) as { c: number }).c;
+  const revoked = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE status = 'revoked' AND owner_email = ?").get(ownerEmail) as { c: number }).c;
+  const total = (db.prepare("SELECT COUNT(*) as c FROM managed_tokens WHERE owner_email = ?").get(ownerEmail) as { c: number }).c;
   return { active, expiringSoon, expired, revoked, total };
 }
 
@@ -177,17 +191,19 @@ export function insertAuditLog(entry: {
   ionosRequestIds?: string[];
   success?: boolean;
   errorMessage?: string;
+  actorEmail?: string;
 }): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO audit_log (action, entity_type, entity_id, details, ionos_request_ids, success, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO audit_log (action, entity_type, entity_id, details, ionos_request_ids, success, error_message, actor_email)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     entry.action, entry.entityType ?? null, entry.entityId ?? null,
     entry.details ? JSON.stringify(entry.details) : null,
     entry.ionosRequestIds ? JSON.stringify(entry.ionosRequestIds) : null,
     entry.success !== false ? 1 : 0,
     entry.errorMessage ?? null,
+    entry.actorEmail ?? null,
   );
 }
 
@@ -198,11 +214,13 @@ export function listAuditLog(filters?: {
   to?: string;
   page?: number;
   limit?: number;
+  actorEmail?: string;
 }): { items: AuditLogEntry[]; total: number } {
   const db = getDb();
   const conditions: string[] = [];
   const params: unknown[] = [];
 
+  if (filters?.actorEmail) { conditions.push('actor_email = ?'); params.push(filters.actorEmail); }
   if (filters?.action) { conditions.push('action = ?'); params.push(filters.action); }
   if (filters?.entityType) { conditions.push('entity_type = ?'); params.push(filters.entityType); }
   if (filters?.from) { conditions.push('created_at >= ?'); params.push(filters.from); }

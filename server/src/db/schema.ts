@@ -1,6 +1,6 @@
 import { getDb } from './connection.js';
 
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 3;
 
 const MIGRATIONS: Record<number, string[]> = {
   1: [
@@ -64,6 +64,15 @@ const MIGRATIONS: Record<number, string[]> = {
       last_renewal_error TEXT,
       auto_renew_enabled INTEGER NOT NULL DEFAULT 1
     )`,
+  ],
+  2: [
+    `ALTER TABLE managed_tokens ADD COLUMN owner_email TEXT`,
+    `UPDATE managed_tokens SET owner_email = 'you@example.com' WHERE owner_email IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_tokens_owner ON managed_tokens(owner_email)`,
+  ],
+  3: [
+    `ALTER TABLE audit_log ADD COLUMN actor_email TEXT`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_email)`,
   ],
 };
 

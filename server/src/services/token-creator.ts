@@ -37,7 +37,7 @@ function generatePassword(): string {
   return Array.from(bytes).map((b) => chars[b % chars.length]).join('');
 }
 
-export async function createManagedToken(req: CreateTokenRequest): Promise<CreateTokenResult> {
+export async function createManagedToken(req: CreateTokenRequest, ownerEmail: string, actorEmail: string): Promise<CreateTokenResult> {
   const rollback = new Rollback();
   const internalId = uuidv4();
   const shortId = internalId.slice(0, 8);
@@ -118,6 +118,7 @@ export async function createManagedToken(req: CreateTokenRequest): Promise<Creat
       expires_at: expiresAt,
       status: 'active',
       cleanup_on_delete: req.cleanupOnDelete !== false ? 1 : 0,
+      owner_email: ownerEmail,
     });
 
     // Audit log
@@ -125,6 +126,7 @@ export async function createManagedToken(req: CreateTokenRequest): Promise<Creat
       action: 'token.create',
       entityType: 'token',
       entityId: internalId,
+      actorEmail,
       details: {
         name: req.name,
         permissions: req.permissions,
@@ -167,6 +169,7 @@ export async function createManagedToken(req: CreateTokenRequest): Promise<Creat
       action: 'token.create',
       entityType: 'token',
       entityId: internalId,
+      actorEmail,
       details: { name: req.name, rollbackResults },
       success: false,
       errorMessage: message,
@@ -176,7 +179,7 @@ export async function createManagedToken(req: CreateTokenRequest): Promise<Creat
   }
 }
 
-export async function regenerateToken(id: string): Promise<{ tokenValue: string; expiresAt: string }> {
+export async function regenerateToken(id: string, actorEmail: string): Promise<{ tokenValue: string; expiresAt: string }> {
   const token = db.getManagedTokenById(id);
   if (!token) throw new Error(`Token not found: ${id}`);
 
@@ -202,13 +205,14 @@ export async function regenerateToken(id: string): Promise<{ tokenValue: string;
     action: 'token.regenerate',
     entityType: 'token',
     entityId: id,
+    actorEmail,
     details: { newTokenId: header.kid, expiresAt },
   });
 
   return { tokenValue: tokenJwt, expiresAt };
 }
 
-export async function revokeManagedToken(id: string): Promise<void> {
+export async function revokeManagedToken(id: string, actorEmail: string): Promise<void> {
   const token = db.getManagedTokenById(id);
   if (!token) throw new Error(`Token not found: ${id}`);
 
@@ -239,6 +243,7 @@ export async function revokeManagedToken(id: string): Promise<void> {
     action: 'token.revoke',
     entityType: 'token',
     entityId: id,
+    actorEmail,
     details: { cleanedUp: token.cleanup_on_delete === 1, errors: errors.length > 0 ? errors : undefined },
   });
 }

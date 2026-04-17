@@ -28,6 +28,7 @@ router.get('/', (req: Request, res: Response) => {
     to: to as string | undefined,
     page: page ? parseInt(page as string, 10) : undefined,
     limit: limit ? parseInt(limit as string, 10) : undefined,
+    actorEmail: req.user.email,
   });
 
   res.json({
@@ -44,7 +45,7 @@ router.get('/', (req: Request, res: Response) => {
 // Export audit log
 router.get('/export', (req: Request, res: Response) => {
   const format = (req.query.format as string) || 'json';
-  const result = db.listAuditLog({ limit: 100000 });
+  const result = db.listAuditLog({ limit: 100000, actorEmail: req.user.email });
   const entries = result.items.map(entryToResponse);
 
   if (format === 'csv') {
