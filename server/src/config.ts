@@ -48,6 +48,10 @@ class Config {
 
   constructor() {
     const env = loadEnv();
+    // Populate process.env with .env file values (actual env vars take precedence)
+    for (const [key, value] of Object.entries(env)) {
+      if (!(key in process.env)) process.env[key] = value;
+    }
     const processEnv = { ...env, ...process.env };
 
     this.port = parseInt(processEnv.PORT || '3000', 10);
