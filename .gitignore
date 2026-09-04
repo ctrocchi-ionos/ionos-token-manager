@@ -33,3 +33,7 @@ npm-debug.log*
 
 # Vite
 client/.vite/
+
+# Personal working notes (not part of the app)
+MEMORY/
+Plans/
