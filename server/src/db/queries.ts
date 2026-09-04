@@ -11,7 +11,7 @@ import type {
 
 // ── Managed Tokens ──
 
-export function insertManagedToken(token: Omit<ManagedToken, 'created_at'>): void {
+export function insertManagedToken(token: Omit<ManagedToken, 'created_at' | 'last_regenerated_at'>): void {
   const db = getDb();
   db.prepare(`
     INSERT INTO managed_tokens (id, name, description, ionos_token_id, ionos_user_id, ionos_group_id,
@@ -86,8 +86,11 @@ export function updateManagedTokenStatus(id: string, status: string): void {
 
 export function updateManagedTokenIonosId(id: string, ionosTokenId: string, expiresAt: string): void {
   const db = getDb();
-  db.prepare('UPDATE managed_tokens SET ionos_token_id = ?, expires_at = ?, status = ? WHERE id = ?')
-    .run(ionosTokenId, expiresAt, 'active', id);
+  db.prepare(`
+    UPDATE managed_tokens
+    SET ionos_token_id = ?, expires_at = ?, status = ?, last_regenerated_at = datetime('now')
+    WHERE id = ?
+  `).run(ionosTokenId, expiresAt, 'active', id);
 }
 
 export function deleteManagedToken(id: string): void {

@@ -128,6 +128,12 @@ export default function TokenDetail() {
               <dt className="text-gray-500">Expires</dt>
               <dd>{formatDate(token.expiresAt)}</dd>
             </div>
+            {token.lastRegeneratedAt && (
+              <div>
+                <dt className="text-gray-500">Last Regenerated</dt>
+                <dd>{formatDate(token.lastRegeneratedAt)}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-gray-500">TTL</dt>
               <dd>{formatTtl(token.ttlSeconds)}</dd>
@@ -190,7 +196,7 @@ export default function TokenDetail() {
       <ConfirmDialog
         open={regenConfirm}
         title="Regenerate Token"
-        message="This will generate a new API token for the same sub-user. The old token will continue to work until it expires — this does not invalidate it."
+        message="This will generate a new API token for the same sub-user and delete the old one. Anything still using the old token will stop working immediately."
         confirmLabel="Regenerate"
         onConfirm={() => regenMut.mutate()}
         onCancel={() => setRegenConfirm(false)}

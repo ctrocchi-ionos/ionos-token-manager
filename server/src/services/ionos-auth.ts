@@ -43,6 +43,13 @@ export async function deleteToken(adminToken: string, tokenId: string): Promise<
   });
 }
 
+export async function deleteTokenAsUser(email: string, password: string, tokenId: string): Promise<void> {
+  const client = createClient();
+  await client.delete(`/tokens/${tokenId}`, {
+    headers: basicAuthHeaders(email, password),
+  });
+}
+
 export async function deleteTokensByCriteria(adminToken: string, criteria: 'EXPIRED' | 'ALL' | 'CURRENT'): Promise<void> {
   const client = createClient();
   await client.delete(`/tokens?criteria=${criteria}`, {

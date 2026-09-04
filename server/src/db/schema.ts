@@ -1,6 +1,6 @@
 import { getDb } from './connection.js';
 
-const CURRENT_VERSION = 4;
+const CURRENT_VERSION = 5;
 
 const MIGRATIONS: Record<number, string[]> = {
   1: [
@@ -86,6 +86,9 @@ const MIGRATIONS: Record<number, string[]> = {
     `INSERT OR IGNORE INTO user_admin_tokens (owner_email, current_token_enc, token_id, issued_at, expires_at)
       SELECT 'you@example.com', current_token_enc, token_id, issued_at, expires_at
       FROM admin_token_state WHERE id = 1`,
+  ],
+  5: [
+    `ALTER TABLE managed_tokens ADD COLUMN last_regenerated_at TEXT`,
   ],
 };
 

@@ -51,6 +51,7 @@ export interface ManagedToken {
   ttl_seconds: number;
   created_at: string;
   expires_at: string;
+  last_regenerated_at: string | null;
   status: 'active' | 'expired' | 'revoked' | 'error';
   cleanup_on_delete: number;
   owner_email: string;
@@ -71,6 +72,7 @@ export interface ManagedTokenResponse {
   ttlSeconds: number;
   createdAt: string;
   expiresAt: string;
+  lastRegeneratedAt: string | null;
   status: string;
   cleanupOnDelete: boolean;
 }

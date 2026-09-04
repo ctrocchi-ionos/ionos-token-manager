@@ -155,6 +155,7 @@ export async function createManagedToken(req: CreateTokenRequest, ownerEmail: st
       ttlSeconds: req.ttlSeconds,
       createdAt: new Date().toISOString(),
       expiresAt,
+      lastRegeneratedAt: null,
       status: 'active',
       cleanupOnDelete: req.cleanupOnDelete !== false,
       tokenValue: tokenJwt,
@@ -199,16 +200,30 @@ export async function regenerateToken(id: string, actorEmail: string, adminToken
   const header = decodeJwtHeader(tokenJwt);
   const payload = decodeJwtPayload(tokenJwt);
   const expiresAt = new Date(payload.exp * 1000).toISOString();
+  const oldTokenId = token.ionos_token_id;
 
   // Update in database
   db.updateManagedTokenIonosId(id, header.kid, expiresAt);
+
+  // Best-effort: delete the previous token so it doesn't linger as an orphan
+  let oldTokenDeleted = false;
+  let oldTokenDeleteError: string | undefined;
+  if (oldTokenId) {
+    try {
+      await ionosAuth.deleteTokenAsUser(token.sub_user_email, password, oldTokenId);
+      oldTokenDeleted = true;
+    } catch (err) {
+      oldTokenDeleteError = err instanceof Error ? err.message : 'unknown error';
+      console.warn(`[TokenCreator] Failed to delete old token ${oldTokenId} during regenerate: ${oldTokenDeleteError}`);
+    }
+  }
 
   db.insertAuditLog({
     action: 'token.regenerate',
     entityType: 'token',
     entityId: id,
     actorEmail,
-    details: { newTokenId: header.kid, expiresAt },
+    details: { newTokenId: header.kid, expiresAt, oldTokenId, oldTokenDeleted, oldTokenDeleteError },
   });
 
   return { tokenValue: tokenJwt, expiresAt };
@@ -265,6 +280,7 @@ export function tokenToResponse(token: ManagedToken): ManagedTokenResponse {
     ttlSeconds: token.ttl_seconds,
     createdAt: token.created_at,
     expiresAt: token.expires_at,
+    lastRegeneratedAt: token.last_regenerated_at,
     status: token.status,
     cleanupOnDelete: token.cleanup_on_delete === 1,
   };

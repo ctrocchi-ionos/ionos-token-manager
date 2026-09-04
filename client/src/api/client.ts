@@ -60,6 +60,7 @@ export interface ManagedToken {
   ttlSeconds: number;
   createdAt: string;
   expiresAt: string;
+  lastRegeneratedAt: string | null;
   status: string;
   cleanupOnDelete: boolean;
 }
