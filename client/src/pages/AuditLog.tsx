@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { listAuditLog } from '@/api/client';
+import { listAuditLog, apiFetch } from '@/api/client';
 import { cn, formatDate } from '@/lib/utils';
 import { Download, ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -28,7 +28,7 @@ export default function AuditLog() {
   const totalPages = Math.ceil(total / 30);
 
   const handleExport = async (format: 'json' | 'csv') => {
-    const res = await fetch(`/api/audit/export?format=${format}`);
+    const res = await apiFetch(`/audit/export?format=${format}`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

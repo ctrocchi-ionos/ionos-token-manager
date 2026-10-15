@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -9,15 +8,10 @@ import AuditLog from './pages/AuditLog';
 import Account from './pages/Account';
 import Settings from './pages/Settings';
 import Setup from './pages/Setup';
-import { checkNeedsSetup } from '@/api/client';
+import { AccountProvider, useAccounts } from '@/lib/account-context';
 
-export default function App() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['needs-setup'],
-    queryFn: checkNeedsSetup,
-    staleTime: Infinity,
-    retry: 1,
-  });
+function AppRoutes() {
+  const { accounts, isLoading, error } = useAccounts();
 
   if (isLoading) {
     return (
@@ -27,9 +21,15 @@ export default function App() {
     );
   }
 
-  if (data?.data?.needsSetup) {
-    return <Setup />;
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white border border-red-200 text-red-700 rounded-xl p-6 max-w-md text-sm">{error.message}</div>
+      </div>
+    );
   }
+
+  if (accounts.length === 0) return <Setup />;
 
   return (
     <Routes>
@@ -44,5 +44,13 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <AccountProvider>
+      <AppRoutes />
+    </AccountProvider>
   );
 }

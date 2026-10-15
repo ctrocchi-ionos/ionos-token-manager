@@ -19,11 +19,29 @@ class ApiError extends Error {
   }
 }
 
+let currentAccountId: string | null = null;
+
+/** The DCD account every account-scoped call is made for (set by AccountProvider). */
+export function setCurrentAccountId(id: string | null): void {
+  currentAccountId = id;
+}
+
+function buildHeaders(extra?: HeadersInit): Headers {
+  const headers = new Headers(extra);
+  headers.set('X-Requested-With', 'token-manager');
+  if (currentAccountId) headers.set('X-DCD-Account', currentAccountId);
+  return headers;
+}
+
+/** fetch() against the API with the CSRF and account headers. Use for downloads. */
+export function apiFetch(path: string, options?: RequestInit): Promise<Response> {
+  return fetch(`${BASE_URL}${path}`, { ...options, headers: buildHeaders(options?.headers) });
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'token-manager', ...options?.headers },
-  });
+  const headers = buildHeaders(options?.headers);
+  headers.set('Content-Type', 'application/json');
+  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
   // Handle non-JSON responses (like CSV exports)
   const contentType = res.headers.get('content-type');
@@ -48,6 +66,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiRespo
 
 export interface ManagedToken {
   id: string;
+  accountId: string;
   name: string;
   description: string | null;
   ionosTokenId: string | null;
@@ -63,6 +82,7 @@ export interface ManagedToken {
   lastRegeneratedAt: string | null;
   status: string;
   cleanupOnDelete: boolean;
+  cleanedUpAt: string | null;
 }
 
 export interface SharedResource {
@@ -143,8 +163,7 @@ export async function bulkDeleteTokens(criteria: 'expired' | 'ids', ids?: string
 }
 
 export async function exportTokens(format: 'json' | 'csv') {
-  const res = await fetch(`${BASE_URL}/tokens/export?format=${format}`);
-  return res;
+  return apiFetch(`/tokens/export?format=${format}`);
 }
 
 // ── Templates ──
@@ -207,6 +226,41 @@ export async function listResources(type?: string) {
 
 export async function getMe() {
   return request<{ email: string }>('/me');
+}
+
+// ── DCD accounts ──
+
+export interface DcdAccount {
+  id: string;
+  label: string;
+  contractNumber: number;
+  hasToken: boolean;
+  tokenId: string | null;
+  expiresAt: string | null;
+  daysRemaining: number;
+  tokensHoldingAccess: number;
+  updatedAt: string;
+  expired: boolean;
+}
+
+export async function listDcdAccounts() {
+  return request<DcdAccount[]>('/dcd-accounts');
+}
+
+export async function addDcdAccount(label: string, token: string) {
+  return request<DcdAccount>('/dcd-accounts', { method: 'POST', body: JSON.stringify({ label, token }) });
+}
+
+export async function replaceDcdAccountToken(id: string, token: string) {
+  return request<DcdAccount>(`/dcd-accounts/${id}/token`, { method: 'PUT', body: JSON.stringify({ token }) });
+}
+
+export async function renameDcdAccount(id: string, label: string) {
+  return request<DcdAccount>(`/dcd-accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ label }) });
+}
+
+export async function removeDcdAccount(id: string) {
+  return request<{ message: string }>(`/dcd-accounts/${id}`, { method: 'DELETE' });
 }
 
 // ── Admin ──
@@ -299,11 +353,11 @@ export async function deleteExternalUser(userId: string) {
 
 export interface AuditEntry {
   id: number;
+  accountId: string | null;
   action: string;
   entityType: string | null;
   entityId: string | null;
   details: Record<string, unknown> | null;
-  ionosRequestIds: string[] | null;
   success: boolean;
   errorMessage: string | null;
   createdAt: string;

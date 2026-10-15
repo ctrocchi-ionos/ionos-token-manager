@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createToken, listTemplates, type CreateTokenPayload, type SharedResource } from '@/api/client';
+import { useAccounts } from '@/lib/account-context';
 import PermissionPicker from '@/components/PermissionPicker';
 import ResourceBrowser from '@/components/ResourceBrowser';
 import TokenReveal from '@/components/TokenReveal';
@@ -15,6 +16,7 @@ const STEPS = ['Name', 'Permissions', 'Resources', 'TTL', 'Review', 'Done'];
 export default function CreateToken() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { current } = useAccounts();
   const [step, setStep] = useState(0);
 
   // Form state
@@ -78,9 +80,22 @@ export default function CreateToken() {
     });
   };
 
+  if (!current?.hasToken || current.expired) {
+    return (
+      <div className="max-w-3xl mx-auto bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-6 text-sm">
+        DCD account <strong>{current?.label}</strong> {current?.hasToken ? 'has an expired API token' : 'has no API token yet'}.
+        {' '}<Link to="/settings" className="underline font-medium">Add or replace it in Settings</Link> to create tokens here.
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Create Token</h1>
+
+      <div className="text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+        Creating in DCD account <strong>{current?.label}</strong> (contract {current?.contractNumber})
+      </div>
 
       {/* Stepper */}
       <div className="flex items-center gap-1">

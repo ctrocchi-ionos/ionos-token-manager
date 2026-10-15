@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { listTokens, getTokenStats, bulkDeleteTokens, revokeToken, dismissToken } from '@/api/client';
+import { listTokens, getTokenStats, apiFetch, bulkDeleteTokens, revokeToken, dismissToken } from '@/api/client';
 import ExpiryBadge from '@/components/ExpiryBadge';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { getEnabledPermissionLabels, countEnabledPermissions } from '@/lib/permissions';
@@ -92,7 +92,7 @@ export default function Dashboard() {
   };
 
   const handleExport = async (format: 'json' | 'csv') => {
-    const resp = await fetch(`/api/tokens/export?format=${format}`);
+    const resp = await apiFetch(`/tokens/export?format=${format}`);
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

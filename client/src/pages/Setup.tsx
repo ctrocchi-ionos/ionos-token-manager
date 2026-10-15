@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { submitSetup } from '@/api/client';
+import { addDcdAccount } from '@/api/client';
 import { Shield, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
 
 export default function Setup() {
   const queryClient = useQueryClient();
+  const [label, setLabel] = useState('');
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -16,9 +17,9 @@ export default function Setup() {
     setError('');
     setIsSubmitting(true);
     try {
-      await submitSetup(trimmed);
+      await addDcdAccount(label.trim(), trimmed);
       // Invalidate so App.tsx re-checks and exits the setup screen
-      await queryClient.invalidateQueries({ queryKey: ['needs-setup'] });
+      await queryClient.invalidateQueries({ queryKey: ['dcd-accounts'] });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.');
     } finally {
@@ -35,17 +36,27 @@ export default function Setup() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900">IONOS Token Manager</h1>
-            <p className="text-sm text-gray-500">Initial Setup</p>
+            <p className="text-sm text-gray-500">Add your first DCD account</p>
           </div>
         </div>
 
         <p className="text-gray-600 mb-6 text-sm leading-relaxed">
-          Paste your IONOS API token below to get started. This should be the owner or admin token
-          from your IONOS DCD account. It will be stored encrypted and used to manage scoped API
-          tokens on your behalf.
+          Connect an IONOS DCD account by pasting an admin API token for it. You can add more
+          accounts later in Settings. Your accounts and tokens are private to you.
         </p>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Account name</label>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              maxLength={60}
+              placeholder="e.g. Production (optional)"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder:text-gray-300"
+            />
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               IONOS API Token
@@ -93,8 +104,8 @@ export default function Setup() {
         </div>
 
         <p className="text-xs text-gray-400 mt-5 leading-relaxed">
-          The token is encrypted with AES-256-GCM before being stored. The encryption key is saved
-          in your data volume and never leaves the server.
+          The token is encrypted with a key unique to your workspace before it is stored. Nobody
+          else using this app can see it.
         </p>
       </div>
     </div>
