@@ -3,8 +3,9 @@ import { exec } from 'child_process';
 import { config } from './config.js';
 import { assertSafeAuthConfig } from './middleware/sso-auth.js';
 import { startExpiredSweep } from './services/expired-sweep.js';
-import { closeAllWorkspaces } from './workspace/registry.js';
+import { resolveMasterKey, verifyMasterKey, recordMasterKey } from './services/master-key.js';
 import { migrateLegacyDatabase } from './workspace/migrate-legacy.js';
+import { closeAllWorkspaces } from './workspace/registry.js';
 import { createApp, publicDir } from './app.js';
 
 async function main() {
@@ -14,7 +15,19 @@ async function main() {
 
   assertSafeAuthConfig();
   config.hardenDataDir();
-  migrateLegacyDatabase(); // throws (and the app does not start) if the master key is wrong
+
+  // Master key: from .env, else the old key file, else generated on a brand-new install
+  const { key, source } = resolveMasterKey({ envKey: config.envEncryptionKey, dataDir: config.dataDir, dotEnvPath: config.dotEnvPath });
+  config.setEncryptionKey(key);
+  verifyMasterKey(key, config.dataDir); // a different key than the data was created with: stop, change nothing
+  migrateLegacyDatabase(); // a key that cannot read the old data: stop, change nothing
+  recordMasterKey(key, config.dataDir);
+  console.log(`[MasterKey] Key source: ${source}`);
+  if (source === 'env' && existsSync(`${config.dataDir}/encryption.key`)) {
+    console.warn('[MasterKey] DATA_DIR/encryption.key is no longer used (ENCRYPTION_KEY is set). Delete it once you have checked the values match.');
+  }
+
+  config.hardenDataDir();
   startExpiredSweep();
 
   if (!config.proxySecret) {
@@ -48,6 +61,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err);
+  console.error('Fatal error:', err instanceof Error ? err.message : err);
   process.exit(1);
 });

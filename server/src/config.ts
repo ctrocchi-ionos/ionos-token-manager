@@ -1,5 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, readdirSync, statSync } from 'fs';
-import { randomBytes } from 'crypto';
+import { readFileSync, existsSync, mkdirSync, chmodSync, readdirSync, statSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { IonosJwtPayload, IonosJwtHeader } from './types/ionos.js';
@@ -9,9 +8,14 @@ process.umask(0o077);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/** The .env file this app reads (and, on a brand-new install, appends ENCRYPTION_KEY to). */
+export function dotEnvFile(): string {
+  return process.env.DOTENV_PATH || resolve(__dirname, '..', '..', '.env');
+}
+
 function loadEnv(): Record<string, string> {
   if (process.env.NO_DOTENV === '1') return {};
-  const envPath = resolve(__dirname, '..', '..', '.env');
+  const envPath = dotEnvFile();
   const env: Record<string, string> = {};
   if (existsSync(envPath)) {
     const content = readFileSync(envPath, 'utf-8');
@@ -50,6 +54,8 @@ class Config {
   readonly dataDir: string;
   readonly projectRoot: string;
   readonly proxySecret: string;
+  readonly envEncryptionKey: string;
+  readonly dotEnvPath: string;
 
   constructor() {
     const env = loadEnv();
@@ -71,27 +77,13 @@ class Config {
 
     mkdirSync(this.dataDir, { recursive: true });
 
-    const keyFile = join(this.dataDir, 'encryption.key');
-    this.encryptionKey = processEnv.ENCRYPTION_KEY || '';
-
-    if (!this.encryptionKey && existsSync(keyFile)) {
-      this.encryptionKey = readFileSync(keyFile, 'utf-8').trim();
-    }
-
-    if (!this.encryptionKey) {
-      this.encryptionKey = randomBytes(32).toString('hex');
-      writeFileSync(keyFile, this.encryptionKey, { encoding: 'utf-8', mode: 0o600 });
-      console.warn('\n' + '!'.repeat(60));
-      console.warn('  AUTO-GENERATED ENCRYPTION KEY');
-      console.warn(`  Saved to: ${keyFile}`);
-      console.warn('  BACK UP THIS FILE — losing it means losing access');
-      console.warn('  to all tokens stored in the database!');
-      console.warn('!'.repeat(60) + '\n');
-    }
-
-    if (this.encryptionKey.length !== 64) {
+    // The master key is resolved at startup by resolveMasterKey() (services/master-key.ts).
+    this.dotEnvPath = dotEnvFile();
+    this.envEncryptionKey = (processEnv.ENCRYPTION_KEY || '').trim();
+    if (this.envEncryptionKey && !/^[0-9a-fA-F]{64}$/.test(this.envEncryptionKey)) {
       throw new Error('ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
     }
+    this.encryptionKey = this.envEncryptionKey;
   }
 
   /** Restrict the data directory and its direct children to the current user (folders 0700, files 0600). */
@@ -108,12 +100,17 @@ class Config {
     }
   }
 
+  hasEncryptionKey(): boolean {
+    return this.encryptionKey.length === 64;
+  }
+
   getEncryptionKey(): Buffer {
+    if (!this.hasEncryptionKey()) throw new Error('Master key not loaded yet (resolved at startup)');
     return Buffer.from(this.encryptionKey, 'hex');
   }
 
   setEncryptionKey(hex: string): void {
-    if (hex.length !== 64) throw new Error('Encryption key must be 64 hex characters');
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error('Encryption key must be 64 hex characters');
     this.encryptionKey = hex;
   }
 }
