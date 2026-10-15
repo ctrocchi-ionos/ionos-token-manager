@@ -82,6 +82,9 @@ test('LEGACY_OWNER_EMAIL receives ownerless tokens; earlier backups are never ov
   assert.deepEqual(r, { migrated: true, owners: 3, tokens: 1, skippedTokens: 1 });
   const legacyWs = openWorkspace('legacy@ionos.com');
   assert.ok(q.getManagedTokenById(legacyWs.db, 'o1'));
+  // Audit entries from before actors were recorded go to the legacy owner too, like the ownerless tokens
+  assert.equal(q.listAuditLog(legacyWs.db, { action: 'token.create.single-user-era' }).total, 1);
+  assert.equal(q.listAuditLog(openWorkspace('alice@ionos.com').db, { action: 'token.create.single-user-era' }).total, 0);
   const after = readdirSync(config.dataDir).filter((f) => f.startsWith('tokenmanager.db.migrated-')).length;
   assert.equal(after, before + 1);
 });

@@ -1,10 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
-import { openWorkspace } from '../workspace/registry.js';
+import { acquireWorkspace } from '../workspace/registry.js';
 import * as q from '../workspace/queries.js';
 
-/** Open the signed-in user's private workspace. Must run after ssoAuth. */
-export function attachWorkspace(req: Request, _res: Response, next: NextFunction): void {
-  req.ws = openWorkspace(req.user.email);
+/** Open the signed-in user's private workspace, held until the response closes. Must run after ssoAuth. */
+export function attachWorkspace(req: Request, res: Response, next: NextFunction): void {
+  const { ws, release } = acquireWorkspace(req.user.email);
+  req.ws = ws;
+  res.on('close', release);
   next();
 }
 

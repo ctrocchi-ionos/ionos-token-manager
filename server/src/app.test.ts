@@ -4,14 +4,18 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'net';
 import { mockIonos, addTestAccount, fakeJwt } from './test-helpers.js';
 
+/** Set by a test to make IONOS answer differently; cleared after use. */
+let ionosOverride: ((method: string, url: string) => { status: number; data?: unknown } | undefined) | undefined;
 const calls = mockIonos((method, url) => {
+  const over = ionosOverride?.(method, url);
+  if (over) return over;
   if (method === 'GET' && url.startsWith('/um/users/colleague-user')) {
     return { status: 200, data: { id: 'colleague-user', properties: { email: 'tkn-abcd1234@c1000.tokenmanager.internal' } } };
   }
   return { status: 200 };
 });
 const { createApp } = await import('./app.js');
-const { openWorkspace } = await import('./workspace/registry.js');
+const { openWorkspace, closeIdleWorkspaces, isWorkspaceOpen, IDLE_CLOSE_MS } = await import('./workspace/registry.js');
 const q = await import('./workspace/queries.js');
 const { encryptWith } = await import('./services/crypto.js');
 
@@ -203,4 +207,63 @@ test('a user with no DCD account can restore their backup (fresh copy of the app
   assert.equal(r.status, 200);
   assert.equal((await r.json()).data.accounts, 1);
   assert.equal((await (await call('/dcd-accounts', 'erin@ionos.com')).json()).data.length, 1);
+});
+
+test('an IONOS 401 reaches the browser as an IONOS error (502), never as "Malformed request" or a sign-in failure', async () => {
+  ionosOverride = () => ({ status: 401 });
+  const warn = console.warn;
+  console.warn = () => {}; // the [IONOS] warning is expected here
+  try {
+    const r = await call('/account/users', 'alice@ionos.com', { account: aliceAcc });
+    assert.equal(r.status, 502);
+    const body = await r.json();
+    assert.equal(body.error.code, 'IONOS_API_ERROR');
+    assert.equal(body.error.details.ionosStatus, 401);
+    assert.match(body.error.message, /IONOS refused the request \(HTTP 401\)/);
+
+    ionosOverride = () => ({ status: 404 });
+    const gone = await call('/account/external-users/someone-gone', 'alice@ionos.com', { method: 'DELETE', account: aliceAcc });
+    assert.equal(gone.status, 502);
+    assert.equal((await gone.json()).error.details.ionosStatus, 404);
+
+    ionosOverride = () => ({ status: 0 }); // IONOS never answered
+    const down = await call('/resources/datacenters', 'alice@ionos.com', { account: aliceAcc });
+    assert.equal(down.status, 502);
+    assert.equal((await down.json()).error.code, 'IONOS_UNREACHABLE');
+  } finally {
+    ionosOverride = undefined;
+    console.warn = warn;
+  }
+});
+
+test('malformed JSON and oversized bodies still get their own 4xx answers', async () => {
+  const bad = await call('/templates', 'alice@ionos.com', { method: 'POST', body: '{"name": ' });
+  assert.equal(bad.status, 400);
+  assert.deepEqual((await bad.json()).error, { code: 'BAD_REQUEST', message: 'Malformed request' });
+  const big = await call('/templates', 'alice@ionos.com', { method: 'POST', body: JSON.stringify({ name: 'x'.repeat(1_100_000) }) });
+  assert.equal(big.status, 413);
+  assert.equal((await big.json()).error.code, 'PAYLOAD_TOO_LARGE');
+});
+
+test('the restore upload limit follows routing: a trailing slash or other letter case is not cut at 1mb', async () => {
+  const keyHex = await (await call('/backup/key', 'alice@ionos.com')).text();
+  for (const path of ['/backup/restore/', '/Backup/Restore']) {
+    const r = await call(path, 'alice@ionos.com', { method: 'POST', body: JSON.stringify({ db: 'A'.repeat(2_000_000), key: keyHex }) });
+    assert.equal(r.status, 400, path); // reaches the restore code (not a backup), not a 413
+    assert.equal((await r.json()).error.code, 'VALIDATION_ERROR', path);
+  }
+});
+
+test('a request body is not read before sign-in', async () => {
+  const r = await fetch(`${base}/templates`, {
+    method: 'POST', headers: { 'X-Requested-With': 'token-manager', 'Content-Type': 'application/json' }, body: '{"broken": ',
+  });
+  assert.equal(r.status, 401); // refused for identity, not parsed (which would answer 400)
+});
+
+test('finished requests release the workspace, so an idle one can close (keep this test last)', async () => {
+  assert.equal((await call('/tokens', 'alice@ionos.com', { account: aliceAcc })).status, 200); // sync route
+  assert.equal((await call('/tokens/nope/regenerate', 'alice@ionos.com', { method: 'POST' })).status, 404); // async route, failing
+  closeIdleWorkspaces(Date.now() + IDLE_CLOSE_MS + 1000);
+  assert.equal(isWorkspaceOpen('alice@ionos.com'), false);
 });

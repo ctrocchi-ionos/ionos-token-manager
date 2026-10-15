@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
-import { addTestAccount, buildLegacyDb } from '../test-helpers.js';
+import { addTestAccount, buildLegacyDb, buildSingleUserDb, LEGACY_SOLO_ADMIN } from '../test-helpers.js';
 
 const { openWorkspace } = await import('../workspace/registry.js');
 const q = await import('../workspace/queries.js');
@@ -206,4 +206,53 @@ test('a backup whose dcd_accounts is a VIEW is refused cleanly and nothing chang
   assert.throws(() => restoreWorkspace(alice, bytes, alice.key.toString('hex')),
     (e: any) => e.statusCode === 400 && /damaged or is not a Token Manager backup/.test(e.message));
   assert.ok(q.templateExistsByName(alice.db, 'view-survivor'));
+});
+
+test('an old single-user backup (no owners) restores for LEGACY_OWNER_EMAIL, with its admin token and audit history', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'solo-'));
+  const path = join(dir, 'solo.db');
+  const legacyKey = randomBytes(32);
+  buildSingleUserDb(path, legacyKey);
+  const solo = openWorkspace('solo@ionos.com');
+  try {
+    // Without LEGACY_OWNER_EMAIL nobody owns these rows: refused, and the message says what to do
+    assert.throws(() => restoreWorkspace(solo, readFileSync(path), legacyKey.toString('hex')),
+      (e: any) => e.code === 'FORBIDDEN' && /LEGACY_OWNER_EMAIL/.test(e.message));
+
+    process.env.LEGACY_OWNER_EMAIL = ' Solo@IONOS.com ';
+    const r = restoreWorkspace(solo, readFileSync(path), legacyKey.toString('hex'));
+    assert.equal(r.format, 'legacy');
+    assert.equal(r.tokens, 1);
+    assert.ok(q.getManagedTokenById(solo.db, 'o1'));
+    const acc = q.getAccountByContract(solo.db, 10000001)!;
+    assert.equal(getAccountAdminToken(solo, acc.id), LEGACY_SOLO_ADMIN);
+    assert.equal(q.listAuditLog(solo.db, { action: 'token.create.single-user-era' }).total, 1);
+
+    // Someone else still gets nothing from it
+    const other = openWorkspace('not-the-owner@ionos.com');
+    assert.throws(() => restoreWorkspace(other, readFileSync(path), legacyKey.toString('hex')), (e: any) => e.code === 'FORBIDDEN');
+  } finally {
+    delete process.env.LEGACY_OWNER_EMAIL;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an old backup holding only an admin token is still checked against the key before anything is replaced', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'admin-only-'));
+  const path = join(dir, 'admin-only.db');
+  const legacyKey = randomBytes(32);
+  buildSingleUserDb(path, legacyKey);
+  const db = new Database(path);
+  db.exec('DELETE FROM managed_tokens');
+  db.close();
+  const solo = openWorkspace('solo2@ionos.com');
+  q.insertPermissionTemplate(solo.db, { name: 'solo2-keep', permissions: {} });
+  process.env.LEGACY_OWNER_EMAIL = 'solo2@ionos.com';
+  try {
+    assert.throws(() => restoreWorkspace(solo, readFileSync(path), randomBytes(32).toString('hex')), /does not match/);
+    assert.ok(q.templateExistsByName(solo.db, 'solo2-keep'));
+  } finally {
+    delete process.env.LEGACY_OWNER_EMAIL;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

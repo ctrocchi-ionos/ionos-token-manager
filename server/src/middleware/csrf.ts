@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** Methods that never change anything (no CSRF header needed, not counted as changes by the rate limit). */
+export const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * Blocks cross-site form posts riding on the SSO cookie. Browsers cannot add a custom

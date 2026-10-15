@@ -93,15 +93,21 @@ function mustGet(ws: Workspace, accountId: string): AccountRow {
 
 export async function addAccount(ws: Workspace, label: string | undefined, rawToken: string): Promise<AccountRow> {
   const v = await verifyAdminToken(rawToken);
+  const alreadyAdded = (existingLabel: string) => new AppError(
+    `Contract ${v.contractNumber} is already added as "${existingLabel}". Use "Replace token" on it instead.`,
+    'ACCOUNT_EXISTS', 409,
+  );
   const existing = q.getAccountByContract(ws.db, v.contractNumber);
-  if (existing) {
-    throw new AppError(
-      `Contract ${v.contractNumber} is already added as "${existing.label}". Use "Replace token" on it instead.`,
-      'ACCOUNT_EXISTS', 409,
-    );
-  }
+  if (existing) throw alreadyAdded(existing.label);
   const id = uuidv4();
-  q.insertAccount(ws.db, { id, label: cleanLabel(label, v.contractNumber), contract_number: v.contractNumber, ...tokenFields(ws, v) });
+  try {
+    q.insertAccount(ws.db, { id, label: cleanLabel(label, v.contractNumber), contract_number: v.contractNumber, ...tokenFields(ws, v) });
+  } catch (err) {
+    // Added in the meantime by another writer of the same file: the contract number is UNIQUE
+    const now = q.getAccountByContract(ws.db, v.contractNumber);
+    if (now && (err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') throw alreadyAdded(now.label);
+    throw err;
+  }
   q.insertAuditLog(ws.db, {
     action: 'account.add', accountId: id, entityType: 'account', entityId: id,
     details: { contractNumber: v.contractNumber, tokenId: v.tokenId, expiresAt: v.expiresAt },

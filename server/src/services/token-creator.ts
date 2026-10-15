@@ -8,6 +8,7 @@ import * as ionosCloud from './ionos-cloud.js';
 import * as q from '../workspace/queries.js';
 import { getAccountAdminToken } from './dcd-accounts.js';
 import { TokenCreationError, AppError, NotFoundError } from '../middleware/error-handler.js';
+import { withKeyLock } from '../lib/key-lock.js';
 import type { Workspace } from '../workspace/registry.js';
 import type { TokenRow } from '../workspace/types.js';
 import type { CreateTokenRequest, CreateTokenResult, ManagedTokenResponse } from '../types/app.js';
@@ -47,6 +48,11 @@ function isNotFound(err: unknown): boolean {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : 'unknown';
+}
+
+/** Regenerate, revoke and the expiry sweep take this lock, so they never interleave on one token. */
+export function tokenLockKey(ws: Workspace, tokenId: string): string {
+  return `token:${ws.id}:${tokenId}`;
 }
 
 function mustGetToken(ws: Workspace, id: string): TokenRow {
@@ -189,7 +195,11 @@ export async function createManagedToken(
   }
 }
 
-export async function regenerateToken(ws: Workspace, id: string): Promise<{ tokenValue: string; expiresAt: string }> {
+export function regenerateToken(ws: Workspace, id: string): Promise<{ tokenValue: string; expiresAt: string }> {
+  return withKeyLock(tokenLockKey(ws, id), () => regenerateLocked(ws, id));
+}
+
+async function regenerateLocked(ws: Workspace, id: string): Promise<{ tokenValue: string; expiresAt: string }> {
   const token = mustGetToken(ws, id);
   if (token.status === 'revoked') {
     throw new AppError('This token was revoked and cannot be regenerated. Create a new one.', 'VALIDATION_ERROR', 400);
@@ -204,7 +214,15 @@ export async function regenerateToken(ws: Workspace, id: string): Promise<{ toke
   const expiresAt = new Date(decodeJwtPayload(tokenJwt).exp * 1000).toISOString();
   const oldTokenId = token.ionos_token_id;
 
-  q.updateManagedTokenIonosId(ws.db, id, newTokenId, expiresAt);
+  if (!q.updateManagedTokenIonosId(ws.db, id, newTokenId, expiresAt)) {
+    // The row was revoked, cleaned up, or removed (e.g. a restore) while IONOS was answering: do not leave the new token live
+    try {
+      await ionosAuth.deleteTokenAsUser(token.sub_user_email, password, newTokenId);
+    } catch (err) {
+      if (!isNotFound(err)) console.warn(`[TokenCreator] Could not delete the token just generated for ${id}: ${errMsg(err)}`);
+    }
+    throw new AppError('This token changed while it was being regenerated (revoked or removed). Reload and try again.', 'TOKEN_CHANGED', 409);
+  }
 
   // Best-effort: delete the previous token so it doesn't linger as an orphan
   let oldTokenDeleted = false;
@@ -249,7 +267,11 @@ export async function cleanupIonosAccess(token: TokenRow, adminToken: string): P
   return errors;
 }
 
-export async function revokeManagedToken(ws: Workspace, id: string): Promise<void> {
+export function revokeManagedToken(ws: Workspace, id: string): Promise<void> {
+  return withKeyLock(tokenLockKey(ws, id), () => revokeLocked(ws, id));
+}
+
+async function revokeLocked(ws: Workspace, id: string): Promise<void> {
   const token = mustGetToken(ws, id);
   const errors: string[] = [];
 

@@ -8,6 +8,25 @@ import { migrateLegacyDatabase } from './workspace/migrate-legacy.js';
 import { closeAllWorkspaces } from './workspace/registry.js';
 import { createApp, publicDir } from './app.js';
 
+/** The generator keeps DATA_DIR/encryption.key on purpose, as a safety copy of the key in .env. Say so, and flag a bad copy. */
+function reportKeyFileCopy(keyFile: string, key: string): void {
+  if (!existsSync(keyFile)) return;
+  let copy: string;
+  try {
+    copy = readFileSync(keyFile, 'utf-8').trim();
+  } catch (err) {
+    console.warn(`[MasterKey] DATA_DIR/encryption.key exists but cannot be read (${err instanceof Error ? err.message : err}). `
+      + 'The app uses ENCRYPTION_KEY; keep a readable copy of it somewhere safe.');
+    return;
+  }
+  if (copy.toLowerCase() === key.toLowerCase()) { // hex: upper and lower case are the same key
+    console.log('[MasterKey] DATA_DIR/encryption.key is kept as a safety copy of ENCRYPTION_KEY (same value). The app uses ENCRYPTION_KEY.');
+  } else {
+    console.warn('[MasterKey] DATA_DIR/encryption.key differs from ENCRYPTION_KEY, so it is not a valid safety copy. '
+      + 'The app uses ENCRYPTION_KEY; put the same value in the file, and keep a copy somewhere safe.');
+  }
+}
+
 async function main() {
   console.log('='.repeat(60));
   console.log('  IONOS Token Manager');
@@ -23,16 +42,7 @@ async function main() {
   migrateLegacyDatabase(); // a key that cannot read the old data: stop, change nothing
   recordMasterKey(key, config.dataDir);
   console.log(`[MasterKey] Key source: ${source}`);
-  const keyFile = `${config.dataDir}/encryption.key`;
-  if (source === 'env' && existsSync(keyFile)) {
-    // The generator keeps this file on purpose, as a safety copy of the key in .env. Say so, and flag a stale copy.
-    if (readFileSync(keyFile, 'utf-8').trim() === key) {
-      console.log('[MasterKey] DATA_DIR/encryption.key is kept as a safety copy of ENCRYPTION_KEY (same value). The app uses ENCRYPTION_KEY.');
-    } else {
-      console.warn('[MasterKey] DATA_DIR/encryption.key differs from ENCRYPTION_KEY, so it is not a valid safety copy. '
-        + 'The app uses ENCRYPTION_KEY; put the same value in the file, and keep a copy somewhere safe.');
-    }
-  }
+  if (source === 'env') reportKeyFileCopy(`${config.dataDir}/encryption.key`, key);
 
   config.hardenDataDir();
   startExpiredSweep();

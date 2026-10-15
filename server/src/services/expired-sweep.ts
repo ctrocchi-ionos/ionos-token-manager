@@ -1,5 +1,6 @@
 import * as q from '../workspace/queries.js';
-import { listWorkspaceEmails, openWorkspace, type Workspace } from '../workspace/registry.js';
+import { acquireWorkspace, closeWorkspaceIfUnused, isWorkspaceOpen, listWorkspaceEmails, type Workspace } from '../workspace/registry.js';
+import { withKeyLock } from '../lib/key-lock.js';
 import * as tokenCreator from './token-creator.js';
 import { getAccountAdminToken } from './dcd-accounts.js';
 
@@ -18,42 +19,57 @@ export async function runExpiredSweep(): Promise<{ cleaned: number; failed: numb
   if (!Number.isFinite(graceDays) || graceDays < 0) return result;
 
   for (const email of listWorkspaceEmails()) {
+    const wasOpen = isWorkspaceOpen(email);
+    let hold: ReturnType<typeof acquireWorkspace> | undefined;
     try {
-      await sweepWorkspace(openWorkspace(email), graceDays, result);
+      hold = acquireWorkspace(email);
+      await sweepWorkspace(hold.ws, graceDays, result);
     } catch (err) {
       // One unreadable workspace must not stop the sweep for everyone else
       result.failed++;
       console.error(`[Sweep] A workspace could not be swept: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      hold?.release();
+      if (!wasOpen) closeWorkspaceIfUnused(email); // do not keep every user's file open after the sweep
     }
   }
   return result;
 }
 
-async function sweepWorkspace(ws: Workspace, graceDays: number, result: { cleaned: number; failed: number; skipped: number }): Promise<void> {
-  for (const token of q.getTokensDueForCleanup(ws.db, graceDays)) {
-    let adminToken: string;
-    try {
-      adminToken = getAccountAdminToken(ws, token.account_id);
-    } catch {
-      result.skipped++; // that DCD account has no usable admin token right now
-      continue;
-    }
+type SweepResult = { cleaned: number; failed: number; skipped: number };
 
-    const errors = await tokenCreator.cleanupIonosAccess(token, adminToken);
-    if (errors.length === 0) {
-      q.markTokenCleanedUp(ws.db, token.id);
-      q.insertAuditLog(ws.db, {
-        action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
-        details: { reason: 'expired', graceDays },
-      });
-      result.cleaned++;
-    } else {
-      q.insertAuditLog(ws.db, {
-        action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
-        success: false, errorMessage: errors.join('; '),
-      });
-      result.failed++;
-    }
+async function sweepWorkspace(ws: Workspace, graceDays: number, result: SweepResult): Promise<void> {
+  for (const { id } of q.getTokensDueForCleanup(ws.db, graceDays)) {
+    // Same lock as regenerate and revoke; then read the token again, it may have been regenerated meanwhile
+    await withKeyLock(tokenCreator.tokenLockKey(ws, id), () => sweepToken(ws, id, graceDays, result));
+  }
+}
+
+async function sweepToken(ws: Workspace, id: string, graceDays: number, result: SweepResult): Promise<void> {
+  const token = q.getTokenIfDueForCleanup(ws.db, id, graceDays);
+  if (!token) return;
+  let adminToken: string;
+  try {
+    adminToken = getAccountAdminToken(ws, token.account_id);
+  } catch {
+    result.skipped++; // that DCD account has no usable admin token right now
+    return;
+  }
+
+  const errors = await tokenCreator.cleanupIonosAccess(token, adminToken);
+  if (errors.length === 0) {
+    q.markTokenCleanedUp(ws.db, token.id);
+    q.insertAuditLog(ws.db, {
+      action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
+      details: { reason: 'expired', graceDays },
+    });
+    result.cleaned++;
+  } else {
+    q.insertAuditLog(ws.db, {
+      action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
+      success: false, errorMessage: errors.join('; '),
+    });
+    result.failed++;
   }
 }
 

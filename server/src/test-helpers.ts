@@ -18,16 +18,29 @@ export function fakeJwt(opts: { contractNumber: number; uuid?: string; kid?: str
   return `${b64(header)}.${b64(payload)}.sig`;
 }
 
-/** Route every axios call through `handler`. Returns the list of "METHOD url" calls made. */
-export function mockIonos(handler: (method: string, url: string, body?: unknown) => { status: number; data?: unknown }): string[] {
+type MockReply = { status: number; data?: unknown };
+
+/**
+ * Route every axios call through `handler` (which may wait). Returns the list of "METHOD url" calls made.
+ * Errors are shaped like axios 1.x errors, including the top-level `status`; status 0 means IONOS never answered.
+ */
+export function mockIonos(handler: (method: string, url: string, body?: unknown) => MockReply | Promise<MockReply>): string[] {
   const calls: string[] = [];
   const respond = async (method: string, url: string, body?: unknown) => {
     calls.push(`${method} ${url}`);
-    const r = handler(method, url, body);
-    if (r.status >= 400) {
-      const e = new Error(`HTTP ${r.status}`) as Error & { isAxiosError: boolean; response: { status: number } };
+    const r = await handler(method, url, body);
+    if (r.status === 0 || r.status >= 400) {
+      const e = new Error(r.status ? `Request failed with status code ${r.status}` : 'connect ECONNREFUSED') as Error & {
+        isAxiosError: boolean; status?: number; code?: string; response?: { status: number }; config: { method: string; url: string };
+      };
       e.isAxiosError = true;
-      e.response = { status: r.status };
+      e.config = { method: method.toLowerCase(), url };
+      if (r.status) {
+        e.status = r.status;
+        e.response = { status: r.status };
+      } else {
+        e.code = 'ECONNREFUSED';
+      }
       throw e;
     }
     return { status: r.status, headers: {}, data: r.data ?? {} };
@@ -84,8 +97,32 @@ export function buildLegacyDb(path: string, key: Buffer, opts: { ownerless?: boo
   tok.run('a2', 'alice-other-contract', 'tkn-a2@c777.tokenmanager.internal', encryptWith(key, 'pw-a2'), exp, 'alice@ionos.com');
   tok.run('b1', 'bob-1', 'tkn-b1@c888.tokenmanager.internal', encryptWith(key, 'pw-b1'), exp, 'bob@ionos.com');
   tok.run('x1', 'weird', 'not-a-tool-user@example.com', encryptWith(key, 'pw-x'), exp, 'alice@ionos.com');
-  if (opts.ownerless) tok.run('o1', 'from-single-user-era', 'tkn-o1@c10000001.tokenmanager.internal', encryptWith(key, 'pw-o1'), exp, null);
+  if (opts.ownerless) {
+    tok.run('o1', 'from-single-user-era', 'tkn-o1@c10000001.tokenmanager.internal', encryptWith(key, 'pw-o1'), exp, null);
+    db.prepare("INSERT INTO audit_log (action, actor_email) VALUES ('token.create.single-user-era', NULL)").run();
+  }
   db.prepare("INSERT INTO permission_templates (id, name, permissions, is_builtin, owner_email) VALUES ('tp1', 'Alice custom', '{}', 0, 'alice@ionos.com')").run();
   db.prepare("INSERT INTO audit_log (action, actor_email) VALUES ('token.create', 'alice@ionos.com'), ('token.create', 'bob@ionos.com')").run();
+  db.close();
+}
+
+/** The admin token of the single-user install built by buildSingleUserDb (contract 10000001). */
+export const LEGACY_SOLO_ADMIN = fakeJwt({ contractNumber: 10000001, kid: 'solo-admin-kid' });
+
+/**
+ * An old single-user database: no owner on any row, the admin token in admin_token_state,
+ * audit entries without an actor. One token (o1), one audit entry.
+ */
+export function buildSingleUserDb(path: string, key: Buffer): void {
+  buildLegacyDb(path, key, { ownerless: true });
+  const db = new Database(path);
+  db.exec(`
+    DELETE FROM managed_tokens WHERE owner_email IS NOT NULL;
+    DELETE FROM user_admin_tokens;
+    DELETE FROM permission_templates;
+    DELETE FROM audit_log WHERE actor_email IS NOT NULL;
+    CREATE TABLE admin_token_state (id INTEGER PRIMARY KEY, current_token_enc TEXT NOT NULL);
+  `);
+  db.prepare('INSERT INTO admin_token_state (id, current_token_enc) VALUES (1, ?)').run(encryptWith(key, LEGACY_SOLO_ADMIN));
   db.close();
 }

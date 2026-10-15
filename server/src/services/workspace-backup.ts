@@ -5,7 +5,9 @@ import { join } from 'path';
 import { decryptWith, encryptWith } from './crypto.js';
 import { AppError, ValidationError } from '../middleware/error-handler.js';
 import { WORKSPACE_SCHEMA_VERSION } from '../workspace/schema.js';
-import { assertKeyWorks, hasColumn, hasTable, migrateOwner } from '../workspace/migrate-legacy.js';
+import {
+  assertKeyWorks, countLegacyRowsFor, countOwnerlessTokens, hasColumn, hasTable, legacyOwnerEmail, migrateOwner,
+} from '../workspace/migrate-legacy.js';
 import * as q from '../workspace/queries.js';
 import { normalizeEmail, type Workspace } from '../workspace/registry.js';
 import type { AccountRow, AuditRow, TemplateRow, TokenRow } from '../workspace/types.js';
@@ -70,7 +72,7 @@ type LiveTokens = Array<{ id: string; name: string }>;
 
 function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: Buffer, live: LiveTokens): Finish {
   requireTables(up, ['workspace_meta', 'schema_version', 'dcd_accounts', 'managed_tokens', 'permission_templates', 'audit_log']);
-  const owner = (up.prepare("SELECT value FROM workspace_meta WHERE key = 'owner_email'").get() as { value: string } | undefined)?.value;
+  const owner = q.readOwner(up);
   if (!owner || normalizeEmail(owner) !== ws.email) throw new AppError('This backup belongs to another user.', 'FORBIDDEN', 403);
   const version = (up.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number | null }).v ?? 0;
   if (version > WORKSPACE_SCHEMA_VERSION) {
@@ -78,10 +80,9 @@ function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: B
   }
   // When WORKSPACE_SCHEMA_VERSION goes above 1, map older backups' columns here.
 
-  const sample = (up.prepare('SELECT token_enc AS v FROM dcd_accounts WHERE token_enc IS NOT NULL LIMIT 1').get()
-    ?? up.prepare('SELECT sub_user_password_enc AS v FROM managed_tokens LIMIT 1').get()) as { v: string } | undefined;
+  const sample = q.sampleSecret(up);
   if (sample) {
-    try { decryptWith(key, sample.v); } catch { throw wrongKey(); }
+    try { decryptWith(key, sample); } catch { throw wrongKey(); }
   }
 
   const reencrypt = (v: string) => encryptWith(ws.key, decryptWith(key, v));
@@ -93,17 +94,10 @@ function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: B
   try {
     ws.db.transaction(() => {
       wipeWorkspace(ws);
-      const insAcc = ws.db.prepare(`INSERT INTO dcd_accounts (id, label, contract_number, admin_user_id, token_enc, token_id,
-        issued_at, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const a of accounts) {
-        insAcc.run(a.id, a.label, a.contract_number, a.admin_user_id, a.token_enc ? reencrypt(a.token_enc) : null,
-          a.token_id, a.issued_at, a.expires_at, a.created_at, a.updated_at);
-      }
+      for (const a of accounts) q.insertAccountRow(ws.db, { ...a, token_enc: a.token_enc ? reencrypt(a.token_enc) : null });
       for (const t of tokens) q.insertTokenRow(ws.db, { ...t, sub_user_password_enc: reencrypt(t.sub_user_password_enc) });
       for (const t of templates) q.insertTemplateRow(ws.db, t, { orIgnore: true });
-      const insAud = ws.db.prepare(`INSERT INTO audit_log (account_id, action, entity_type, entity_id, details, success, error_message, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const e of audit) insAud.run(e.account_id, e.action, e.entity_type, e.entity_id, e.details, e.success, e.error_message, e.created_at);
+      for (const e of audit) q.insertAuditRow(ws.db, e);
       refuseOrphans(ws, live);
     })();
   } catch (err) {
@@ -119,10 +113,15 @@ function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buff
   if (!hasColumn(up, 'managed_tokens', 'owner_email')) {
     throw new ValidationError('This backup is from a very old version and cannot be restored.');
   }
-  const count = (sql: string) => (up.prepare(sql).get(ws.email) as { c: number }).c;
-  const mine = count('SELECT COUNT(*) AS c FROM managed_tokens WHERE lower(trim(owner_email)) = ?')
-    + (hasTable(up, 'user_admin_tokens') ? count('SELECT COUNT(*) AS c FROM user_admin_tokens WHERE lower(trim(owner_email)) = ?') : 0);
-  if (mine === 0) throw new AppError('This backup has no data for your account.', 'FORBIDDEN', 403);
+  // Rows with no owner come from a single-user install and belong to LEGACY_OWNER_EMAIL, as in the startup migration
+  const isLegacyOwner = ws.email === legacyOwnerEmail();
+  if (countLegacyRowsFor(up, ws.email, isLegacyOwner) === 0) {
+    const ownerless = isLegacyOwner ? 0 : countOwnerlessTokens(up);
+    throw new AppError(ownerless > 0
+      ? `This backup has no data for your account. Its ${ownerless} token(s) have no owner (a single-user install): `
+        + 'the administrator can set LEGACY_OWNER_EMAIL to your email so you can restore them.'
+      : 'This backup has no data for your account.', 'FORBIDDEN', 403);
+  }
   try { assertKeyWorks(up, key); } catch { throw wrongKey(); }
 
   let counts = { tokens: 0, skipped: 0 };
@@ -131,7 +130,7 @@ function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buff
       wipeWorkspace(ws);
       // Clear the flag so migrateOwner imports; it sets the flag again itself.
       ws.db.prepare("DELETE FROM workspace_meta WHERE key = 'legacy_migrated'").run();
-      counts = migrateOwner(up, ws, key, false); // nested transaction = savepoint
+      counts = migrateOwner(up, ws, key, isLegacyOwner); // nested transaction = savepoint
       refuseOrphans(ws, live);
     })();
   } catch (err) {

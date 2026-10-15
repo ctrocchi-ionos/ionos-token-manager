@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import Database from 'better-sqlite3';
 import { decryptWith, deriveWorkspaceKey, encryptWith } from './crypto.js';
 import { workspaceIdFor } from '../workspace/registry.js';
+import { readOwner, sampleSecret } from '../workspace/queries.js';
 
 export type MasterKeySource = 'env' | 'data-file' | 'generated-env' | 'generated-data-file';
 
@@ -66,11 +67,10 @@ function sampleWorkspaceSecret(dataDir: string): { id: string; enc: string } | u
     let db: Database.Database | undefined;
     try {
       db = new Database(file, { readonly: true, fileMustExist: true });
-      const owner = (db.prepare("SELECT value FROM workspace_meta WHERE key = 'owner_email'").get() as { value: string } | undefined)?.value;
+      const owner = readOwner(db);
       if (!owner || workspaceIdFor(owner) !== id) continue; // the app ignores such folders too
-      const row = (db.prepare('SELECT token_enc AS v FROM dcd_accounts WHERE token_enc IS NOT NULL LIMIT 1').get()
-        ?? db.prepare('SELECT sub_user_password_enc AS v FROM managed_tokens LIMIT 1').get()) as { v: string } | undefined;
-      if (row) return { id, enc: row.v };
+      const enc = sampleSecret(db);
+      if (enc) return { id, enc };
     } catch {
       // An unreadable file says nothing about the key; try the next workspace
     } finally {

@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { config } from '../config.js';
 import { deriveWorkspaceKey } from '../services/crypto.js';
 import { initializeWorkspaceSchema, seedBuiltinTemplates } from './schema.js';
+import { readOwner } from './queries.js';
 
 /** One signed-in user's private data: their own SQLite file and their own encryption key. */
 export interface Workspace {
@@ -15,7 +16,17 @@ export interface Workspace {
 }
 
 const DB_FILE = 'workspace.db';
-const openWorkspaces = new Map<string, Workspace>();
+/** A workspace closes after this long with nobody using it; it reopens on the next request. */
+export const IDLE_CLOSE_MS = 30 * 60_000;
+const EVICT_EVERY_MS = 60_000;
+
+interface OpenEntry {
+  ws: Workspace;
+  users: number; // requests and sweeps holding it right now
+  lastUsed: number;
+}
+const openWorkspaces = new Map<string, OpenEntry>();
+let lastEviction = 0;
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -30,15 +41,13 @@ export function workspacesRoot(): string {
   return join(config.dataDir, 'workspaces');
 }
 
-function readOwner(db: Database.Database): string | undefined {
-  const row = db.prepare("SELECT value FROM workspace_meta WHERE key = 'owner_email'").get() as { value: string } | undefined;
-  return row?.value;
-}
-
-export function openWorkspace(email: string): Workspace {
+function openEntry(email: string): OpenEntry {
   const normalized = normalizeEmail(email);
   const cached = openWorkspaces.get(normalized);
-  if (cached) return cached;
+  if (cached) {
+    cached.lastUsed = Date.now();
+    return cached;
+  }
 
   const id = workspaceIdFor(normalized);
   const dir = join(workspacesRoot(), id);
@@ -58,9 +67,74 @@ export function openWorkspace(email: string): Workspace {
   }
   seedBuiltinTemplates(db);
 
-  const ws: Workspace = { id, email: normalized, db, key: deriveWorkspaceKey(config.getEncryptionKey(), id) };
-  openWorkspaces.set(normalized, ws);
-  return ws;
+  const entry: OpenEntry = {
+    ws: { id, email: normalized, db, key: deriveWorkspaceKey(config.getEncryptionKey(), id) },
+    users: 0,
+    lastUsed: Date.now(),
+  };
+  openWorkspaces.set(normalized, entry);
+  return entry;
+}
+
+/** The user's workspace, opened on first use. For short synchronous work (startup migration, tests). */
+export function openWorkspace(email: string): Workspace {
+  return openEntry(email).ws;
+}
+
+/**
+ * The user's workspace, held open until `release()` (a request holds it until its response closes).
+ * Idle workspaces of other users are closed along the way, so open files do not grow with every user ever seen.
+ */
+export function acquireWorkspace(email: string): { ws: Workspace; release: () => void } {
+  const now = Date.now();
+  if (now - lastEviction >= EVICT_EVERY_MS) {
+    lastEviction = now;
+    closeIdleWorkspaces(now);
+  }
+  const entry = openEntry(email);
+  entry.users++;
+  let released = false;
+  return {
+    ws: entry.ws,
+    release: () => {
+      if (released) return;
+      released = true;
+      entry.users--;
+      entry.lastUsed = Date.now();
+    },
+  };
+}
+
+export function isWorkspaceOpen(email: string): boolean {
+  return openWorkspaces.has(normalizeEmail(email));
+}
+
+function closeEntry(email: string, entry: OpenEntry): void {
+  openWorkspaces.delete(email);
+  try {
+    entry.ws.db.close();
+  } catch {
+    // already closed
+  }
+}
+
+/** Close one workspace if nobody holds it (the expiry sweep closes the ones it opened itself). */
+export function closeWorkspaceIfUnused(email: string): void {
+  const normalized = normalizeEmail(email);
+  const entry = openWorkspaces.get(normalized);
+  if (entry && entry.users === 0) closeEntry(normalized, entry);
+}
+
+/** Close every workspace nobody holds and nobody used for IDLE_CLOSE_MS. Returns how many were closed. */
+export function closeIdleWorkspaces(now = Date.now()): number {
+  let closed = 0;
+  for (const [email, entry] of openWorkspaces) {
+    if (entry.users === 0 && now - entry.lastUsed >= IDLE_CLOSE_MS) {
+      closeEntry(email, entry);
+      closed++;
+    }
+  }
+  return closed;
 }
 
 /** Owner emails of every workspace on disk (used by the background expiry sweep). */
@@ -88,6 +162,5 @@ export function listWorkspaceEmails(): string[] {
 }
 
 export function closeAllWorkspaces(): void {
-  for (const ws of openWorkspaces.values()) ws.db.close();
-  openWorkspaces.clear();
+  for (const [email, entry] of openWorkspaces) closeEntry(email, entry);
 }

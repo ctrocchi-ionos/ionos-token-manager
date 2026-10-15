@@ -1,3 +1,4 @@
+import axios from 'axios';
 import type { Request, Response, NextFunction } from 'express';
 
 export class AppError extends Error {
@@ -40,6 +41,16 @@ export class NotFoundError extends AppError {
   }
 }
 
+function ionosErrorMessage(status: number): string {
+  if (status === 401 || status === 403) {
+    return `IONOS refused the request (HTTP ${status}). The API token of this DCD account, or the token's own `
+      + 'IONOS user, may no longer be valid. If this keeps happening, replace the token in Settings.';
+  }
+  if (status === 404) return 'IONOS could not find this item (HTTP 404). It may have been deleted outside this app.';
+  if (status === 429) return 'IONOS is limiting requests (HTTP 429). Wait a minute and try again.';
+  return `IONOS returned an error (HTTP ${status}). Try again.`;
+}
+
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
@@ -49,9 +60,25 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
-  // Body-parser errors (malformed JSON, payload too large) carry a 4xx status
-  const status = (err as { status?: number }).status;
-  if (status && status >= 400 && status < 500) {
+  // A call to IONOS failed and no service turned it into an AppError. It is never the browser's fault,
+  // and an IONOS 401 must not look like a failed sign-in to this app: always 502, with IONOS's status.
+  if (axios.isAxiosError(err)) {
+    const ionosStatus = err.response?.status;
+    const path = (err.config?.url ?? '').split('?')[0];
+    console.warn(`[IONOS] ${err.config?.method?.toUpperCase() ?? ''} ${path} failed: ${ionosStatus ?? err.code ?? 'no response'}`);
+    res.status(502).json({
+      success: false,
+      error: ionosStatus
+        ? { code: 'IONOS_API_ERROR', message: ionosErrorMessage(ionosStatus), details: { ionosStatus } }
+        : { code: 'IONOS_UNREACHABLE', message: 'Could not reach IONOS. Try again.' },
+    });
+    return;
+  }
+
+  // Body-parser errors (malformed JSON, payload too large): http-errors with a `type` and `expose`
+  const parserError = err as { status?: number; type?: unknown; expose?: unknown };
+  const status = parserError.status;
+  if (typeof parserError.type === 'string' && parserError.expose === true && status && status >= 400 && status < 500) {
     res.status(status).json({
       success: false,
       error: { code: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST', message: status === 413 ? 'Request body too large' : 'Malformed request' },

@@ -27,10 +27,10 @@ export function hasColumn(db: Database.Database, table: string, column: string):
 }
 
 export function assertKeyWorks(legacy: Database.Database, master: Buffer): void {
-  const sample = (hasTable(legacy, 'user_admin_tokens')
-    ? legacy.prepare('SELECT current_token_enc AS v FROM user_admin_tokens LIMIT 1').get()
-    : undefined) as { v: string } | undefined
-    ?? legacy.prepare('SELECT sub_user_password_enc AS v FROM managed_tokens LIMIT 1').get() as { v: string } | undefined;
+  const first = (sql: string) => legacy.prepare(sql).get() as { v: string } | undefined;
+  const sample = (hasTable(legacy, 'user_admin_tokens') ? first('SELECT current_token_enc AS v FROM user_admin_tokens LIMIT 1') : undefined)
+    ?? first('SELECT sub_user_password_enc AS v FROM managed_tokens LIMIT 1')
+    ?? (hasTable(legacy, 'admin_token_state') ? first('SELECT current_token_enc AS v FROM admin_token_state LIMIT 1') : undefined);
   if (!sample) return;
   try {
     decryptWith(master, sample.v);
@@ -40,13 +40,29 @@ export function assertKeyWorks(legacy: Database.Database, master: Buffer): void 
   }
 }
 
-function legacyOwnerEmail(): string | null {
+/** LEGACY_OWNER_EMAIL: the person who owned a single-user install, whose rows have no owner. */
+export function legacyOwnerEmail(): string | null {
   const v = (process.env.LEGACY_OWNER_EMAIL || '').trim().toLowerCase();
   return v || null;
 }
 
 /** Rows whose owner column is empty: they belong to LEGACY_OWNER_EMAIL (single-user installs). */
-const NO_OWNER = "(owner_email IS NULL OR trim(owner_email) = '')";
+const noOwner = (column: string) => `(${column} IS NULL OR trim(${column}) = '')`;
+const NO_OWNER = noOwner('owner_email');
+
+/** Rows of one user (bound as the single parameter); the legacy owner also gets the rows with no owner. */
+const ownedBy = (column: string, isLegacyOwner: boolean) =>
+  isLegacyOwner ? `(lower(trim(${column})) = ? OR ${noOwner(column)})` : `lower(trim(${column})) = ?`;
+
+export function countOwnerlessTokens(legacy: Database.Database): number {
+  return (legacy.prepare(`SELECT COUNT(*) AS c FROM managed_tokens WHERE ${NO_OWNER}`).get() as { c: number }).c;
+}
+
+/** How many of this user's rows (tokens, plus their admin token) an old database holds. */
+export function countLegacyRowsFor(legacy: Database.Database, email: string, isLegacyOwner: boolean): number {
+  const tokens = (legacy.prepare(`SELECT COUNT(*) AS c FROM managed_tokens WHERE ${ownedBy('owner_email', isLegacyOwner)}`).get(email) as { c: number }).c;
+  return tokens + (legacyAdminTokenEnc(legacy, email, isLegacyOwner) ? 1 : 0);
+}
 
 function listOwners(legacy: Database.Database, legacyOwner: string | null): string[] {
   const owners = new Set<string>();
@@ -76,7 +92,7 @@ function legacyAdminTokenEnc(legacy: Database.Database, email: string, isLegacyO
 }
 
 export function migrateOwner(legacy: Database.Database, ws: Workspace, master: Buffer, isLegacyOwner: boolean): { tokens: number; skipped: number } {
-  const ownerFilter = isLegacyOwner ? `(lower(trim(owner_email)) = ? OR ${NO_OWNER})` : 'lower(trim(owner_email)) = ?';
+  const ownerFilter = ownedBy('owner_email', isLegacyOwner);
   if (ws.db.prepare("SELECT 1 FROM workspace_meta WHERE key = 'legacy_migrated'").get()) {
     // Already migrated earlier (e.g. rollback + redeploy). Never import twice, but never hide tokens either.
     const ids = legacy.prepare(`SELECT id FROM managed_tokens WHERE ${ownerFilter}`).all(ws.email) as Array<{ id: string }>;
@@ -169,13 +185,16 @@ export function migrateOwner(legacy: Database.Database, ws: Workspace, master: B
       }, { orIgnore: true });
     }
 
-    // 4. This user's own audit history
-    if (hasColumn(legacy, 'audit_log', 'actor_email')) {
-      const insertAudit = ws.db.prepare(`INSERT INTO audit_log (account_id, action, entity_type, entity_id, details, success, error_message, created_at)
-        VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`);
-      for (const a of legacy.prepare('SELECT * FROM audit_log WHERE lower(trim(actor_email)) = ? ORDER BY id').all(ws.email) as Row[]) {
-        insertAudit.run(a.action, a.entity_type, a.entity_id, a.details, a.success, a.error_message, a.created_at);
-      }
+    // 4. This user's own audit history (the legacy owner also gets entries from before actors were recorded)
+    const audit = (hasColumn(legacy, 'audit_log', 'actor_email')
+      ? legacy.prepare(`SELECT * FROM audit_log WHERE ${ownedBy('actor_email', isLegacyOwner)} ORDER BY id`).all(ws.email)
+      : isLegacyOwner && hasTable(legacy, 'audit_log') ? legacy.prepare('SELECT * FROM audit_log ORDER BY id').all() : []) as Row[];
+    for (const a of audit) {
+      q.insertAuditRow(ws.db, {
+        account_id: null, action: String(a.action), entity_type: a.entity_type as string | null, entity_id: a.entity_id as string | null,
+        details: a.details as string | null, success: Number(a.success ?? 1), error_message: a.error_message as string | null,
+        created_at: String(a.created_at),
+      });
     }
 
     ws.db.prepare("INSERT INTO workspace_meta (key, value) VALUES ('legacy_migrated', datetime('now'))").run();
@@ -210,7 +229,7 @@ export function migrateLegacyDatabase(): LegacyMigrationResult {
     assertKeyWorks(legacy, master);
 
     // Refuse BEFORE writing anything: ownerless tokens would otherwise be left unmanageable.
-    const ownerless = (legacy.prepare(`SELECT COUNT(*) AS c FROM managed_tokens WHERE ${NO_OWNER}`).get() as { c: number }).c;
+    const ownerless = countOwnerlessTokens(legacy);
     if (ownerless > 0 && !legacyOwner) {
       throw new Error(`Legacy database has ${ownerless} token(s) with no owner. Set LEGACY_OWNER_EMAIL to the person `
         + 'who owned this install and restart. Nothing was migrated.');

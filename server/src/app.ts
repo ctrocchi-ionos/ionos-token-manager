@@ -1,4 +1,4 @@
-import express, { type NextFunction, type Request, type Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import { resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -24,11 +24,6 @@ export function createApp(): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(securityHeaders);
-  // The restore upload has its own larger limit (routes/backup.ts), applied after authentication
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path === '/api/backup/restore') return next();
-    express.json({ limit: '1mb' })(req, res, next);
-  });
   app.use(requestLogger);
 
   // Platform health check: unauthenticated, no details. Path must not change.
@@ -43,13 +38,17 @@ export function createApp(): express.Express {
     res.json({ success: true, data: { email: req.user.email } });
   });
 
+  // Bodies are read only after sign-in. Backup routes come first: the restore upload parses its own,
+  // larger body (routes/backup.ts); every other route gets the 1mb limit. Routing decides, not a path string.
+  app.use('/api/backup', backupRoutes);
+  app.use('/api', express.json({ limit: '1mb' }));
+
   app.use('/api/dcd-accounts', dcdAccountRoutes);
   app.use('/api/tokens', tokenRoutes);
   app.use('/api/templates', templateRoutes);
   app.use('/api/resources', resourceRoutes);
   app.use('/api/audit', auditRoutes);
   app.use('/api/account', accountRoutes);
-  app.use('/api/backup', backupRoutes);
 
   // Unknown API paths get JSON, never the SPA's index.html
   app.use('/api', (_req: Request, res: Response) => {

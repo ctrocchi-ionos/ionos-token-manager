@@ -68,7 +68,7 @@ That's it. The token is stored encrypted and the app manages itself from there.
 | `PUBLIC_DIR` | `./public` | Path to the built frontend files (rarely needs changing) |
 | `PROXY_SECRET` | *(none)* | Optional. Shared secret your SSO proxy sends as `X-Proxy-Secret`. If set, it must be at least 32 characters (e.g. `openssl rand -hex 32`), otherwise the app refuses to start. Without it, anyone who can reach the port can claim any identity via `X-Auth-Email`. |
 | `EXPIRED_CLEANUP_GRACE_DAYS` | `7` | Days after expiry before the app deletes a token's IONOS sub-user and group (only for tokens created with cleanup on). `-1` turns it off. |
-| `LEGACY_OWNER_EMAIL` | *(none)* | Only for upgrading very old installs: owner to assign to rows created before per-user ownership. |
+| `LEGACY_OWNER_EMAIL` | *(none)* | Only for very old installs: owner to assign to rows created before per-user ownership (on upgrade, and when restoring an old single-user backup). |
 
 Local development (`npm run dev`) also reads `DEV_AUTH_EMAIL` from `.env` as a stand-in for the SSO proxy. It is ignored by `npm start`.
 
@@ -98,7 +98,7 @@ In **Settings → Backup & restore**, every user can download two files: **my da
 
 A backup belongs to the email it was made with. To restore it on your PC, set `DEV_AUTH_EMAIL` in your local `.env` to the same email you use on the marketplace.
 
-Backups made by older versions of the app (whole database + `encryption.key`) can also be restored; only your own data is taken from them.
+Backups made by older versions of the app (whole database + `encryption.key`) can also be restored; only your own data is taken from them. In a backup from a single-user install, rows have no owner: they go to `LEGACY_OWNER_EMAIL`, as on upgrade.
 
 Restore replaces your current data. If you created tokens after the backup was made and they still have a live IONOS user, the restore is refused until you revoke them on the dashboard; otherwise their IONOS users would stay behind with nothing left in the app to remove them.
 

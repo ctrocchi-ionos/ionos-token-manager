@@ -1,8 +1,8 @@
 import rateLimit from 'express-rate-limit';
 import type { Request } from 'express';
+import { SAFE_METHODS } from './csrf.js';
 
 const message = { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down.' } };
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // Everyone arrives from the SSO proxy's IP, so count per signed-in user instead.
 const byUser = (req: Request) => `user:${req.user.email}`;
 const common = {

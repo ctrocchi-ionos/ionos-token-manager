@@ -23,7 +23,7 @@ router.get('/key', (req: Request, res: Response) => {
   res.send(req.ws.key.toString('hex'));
 });
 
-// Restore: { db: base64, key: string }. The global 1mb JSON parser skips this path (see app.ts).
+// Restore: { db: base64, key: string }. Mounted before the 1mb JSON parser (see app.ts), so this limit applies.
 router.post('/restore', express.json({ limit: '50mb' }), (req: Request, res: Response) => {
   const { db, key } = (req.body ?? {}) as { db?: unknown; key?: unknown };
   if (typeof db !== 'string' || !db || typeof key !== 'string') {
