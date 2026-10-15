@@ -263,45 +263,18 @@ export async function removeDcdAccount(id: string) {
   return request<{ message: string }>(`/dcd-accounts/${id}`, { method: 'DELETE' });
 }
 
-// ── Admin ──
+// ── My backup ──
 
-export interface AdminTokenStatus {
-  tokenId: string | null;
-  issuedAt: string | null;
-  expiresAt: string | null;
-  daysRemaining: number;
-  lastUpdatedAt: string | null;
+export interface RestoreResult {
+  format: 'workspace' | 'legacy';
+  accounts: number;
+  tokens: number;
+  templates: number;
+  skipped: number;
 }
 
-export interface HealthInfo {
-  status: string;
-  dbConnected: boolean;
-}
-
-export async function checkNeedsSetup() {
-  return request<{ needsSetup: boolean }>('/admin/needs-setup');
-}
-
-export async function submitSetup(token: string) {
-  return request<{ message: string }>('/admin/setup', {
-    method: 'POST',
-    body: JSON.stringify({ token }),
-  });
-}
-
-export async function getHealth() {
-  return request<HealthInfo>('/admin/health');
-}
-
-export async function getAdminTokenStatus() {
-  return request<AdminTokenStatus>('/admin/token-status');
-}
-
-export async function updateAdminToken(token: string) {
-  return request<{ message: string }>('/admin/token', {
-    method: 'PUT',
-    body: JSON.stringify({ token }),
-  });
+export async function restoreMyBackup(db: string, key: string) {
+  return request<RestoreResult>('/backup/restore', { method: 'POST', body: JSON.stringify({ db, key }) });
 }
 
 // ── Account ──

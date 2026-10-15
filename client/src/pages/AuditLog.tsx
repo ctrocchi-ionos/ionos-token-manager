@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { listAuditLog, apiFetch } from '@/api/client';
+import { useAccounts } from '@/lib/account-context';
 import { cn, formatDate } from '@/lib/utils';
 import { Download, ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -8,12 +9,25 @@ const ACTION_LABELS: Record<string, string> = {
   'token.create': 'Token Created',
   'token.revoke': 'Token Revoked',
   'token.regenerate': 'Token Regenerated',
-  'admin.renew': 'Admin Token Renewed',
   'template.create': 'Template Created',
   'template.delete': 'Template Deleted',
+  'account.add': 'DCD Account Added',
+  'account.token_replace': 'DCD Token Replaced',
+  'account.rename': 'DCD Account Renamed',
+  'account.remove': 'DCD Account Removed',
+  'account.delete_external_user': 'External IONOS User Deleted',
+  'token.dismiss': 'Token Dismissed',
+  'token.auto_cleanup': 'Expired Token Cleaned Up',
+  'template.update': 'Template Updated',
+  'workspace.migrated': 'Workspace Created From Old Data',
+  'workspace.backup': 'Backup Downloaded',
+  'workspace.backup_key': 'Backup Key Downloaded',
+  'workspace.restore': 'Backup Restored',
 };
 
 export default function AuditLog() {
+  const { accounts } = useAccounts();
+  const accountLabel = (id: string | null) => (id ? accounts.find((a) => a.id === id)?.label ?? 'removed account' : '-');
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [actionFilter, setActionFilter] = useState<string>('');
@@ -89,6 +103,7 @@ export default function AuditLog() {
                 <th className="w-8 px-3 py-3"></th>
                 <th className="text-left px-3 py-3 font-medium text-gray-500">Action</th>
                 <th className="text-left px-3 py-3 font-medium text-gray-500">Status</th>
+                <th className="text-left px-3 py-3 font-medium text-gray-500">Account</th>
                 <th className="text-left px-3 py-3 font-medium text-gray-500">Entity</th>
                 <th className="text-left px-3 py-3 font-medium text-gray-500">Date</th>
               </tr>
@@ -98,7 +113,7 @@ export default function AuditLog() {
                 const isExpanded = expandedId === entry.id;
                 return (
                   <tr key={entry.id}>
-                    <td colSpan={5} className="p-0">
+                    <td colSpan={6} className="p-0">
                       <div
                         className="flex items-center px-3 py-3 cursor-pointer hover:bg-gray-50"
                         onClick={() => setExpandedId(isExpanded ? null : entry.id)}
@@ -120,6 +135,7 @@ export default function AuditLog() {
                             <XCircle className="w-4 h-4 text-red-500" />
                           )}
                         </div>
+                        <div className="w-40 text-gray-500 text-xs truncate">{accountLabel(entry.accountId)}</div>
                         <div className="w-32 text-gray-500 text-xs font-mono">
                           {entry.entityId?.slice(0, 8) ?? '-'}
                         </div>
