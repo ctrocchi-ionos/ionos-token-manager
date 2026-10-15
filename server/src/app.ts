@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -15,6 +15,7 @@ import templateRoutes from './routes/templates.js';
 import resourceRoutes from './routes/resources.js';
 import auditRoutes from './routes/audit.js';
 import accountRoutes from './routes/account.js';
+import backupRoutes from './routes/backup.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const publicDir = process.env.PUBLIC_DIR || resolve(__dirname, '..', '..', 'public');
@@ -23,7 +24,11 @@ export function createApp(): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(securityHeaders);
-  app.use(express.json({ limit: '1mb' }));
+  // The restore upload has its own larger limit (routes/backup.ts), applied after authentication
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path === '/api/backup/restore') return next();
+    express.json({ limit: '1mb' })(req, res, next);
+  });
   app.use(requestLogger);
 
   // Platform health check: unauthenticated, no details. Path must not change.
@@ -44,6 +49,7 @@ export function createApp(): express.Express {
   app.use('/api/resources', resourceRoutes);
   app.use('/api/audit', auditRoutes);
   app.use('/api/account', accountRoutes);
+  app.use('/api/backup', backupRoutes);
 
   // Unknown API paths get JSON, never the SPA's index.html
   app.use('/api', (_req: Request, res: Response) => {

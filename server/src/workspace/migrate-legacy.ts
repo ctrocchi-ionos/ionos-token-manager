@@ -16,15 +16,15 @@ export interface LegacyMigrationResult {
 type Row = Record<string, unknown>;
 const SUB_USER_CONTRACT = /@c(\d+)\.tokenmanager\.internal$/;
 
-function hasTable(db: Database.Database, name: string): boolean {
+export function hasTable(db: Database.Database, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
-function hasColumn(db: Database.Database, table: string, column: string): boolean {
+export function hasColumn(db: Database.Database, table: string, column: string): boolean {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((c) => c.name === column);
 }
 
-function assertKeyWorks(legacy: Database.Database, master: Buffer): void {
+export function assertKeyWorks(legacy: Database.Database, master: Buffer): void {
   const sample = (hasTable(legacy, 'user_admin_tokens')
     ? legacy.prepare('SELECT current_token_enc AS v FROM user_admin_tokens LIMIT 1').get()
     : undefined) as { v: string } | undefined
@@ -73,7 +73,7 @@ function legacyAdminTokenEnc(legacy: Database.Database, email: string, isLegacyO
   return undefined;
 }
 
-function migrateOwner(legacy: Database.Database, ws: Workspace, master: Buffer, isLegacyOwner: boolean): { tokens: number; skipped: number } {
+export function migrateOwner(legacy: Database.Database, ws: Workspace, master: Buffer, isLegacyOwner: boolean): { tokens: number; skipped: number } {
   const ownerFilter = isLegacyOwner ? `(lower(trim(owner_email)) = ? OR ${NO_OWNER})` : 'lower(trim(owner_email)) = ?';
   if (ws.db.prepare("SELECT 1 FROM workspace_meta WHERE key = 'legacy_migrated'").get()) {
     // Already migrated earlier (e.g. rollback + redeploy). Never import twice, but never hide tokens either.

@@ -101,6 +101,31 @@ test('backup and restore endpoints are gone', async () => {
   assert.equal((await restore.json()).error.code, 'NOT_FOUND');
 });
 
+test('my key and my database download, and the database restores over HTTP (upload larger than the 1mb JSON limit)', async () => {
+  const key = await call('/backup/key', 'alice@ionos.com');
+  assert.equal(key.status, 200);
+  assert.match(key.headers.get('content-disposition') ?? '', /tokenmanager-my-key\.key/);
+  const keyHex = await key.text();
+  assert.match(keyHex, /^[0-9a-f]{64}$/);
+
+  const db = await call('/backup/db', 'alice@ionos.com');
+  assert.equal(db.status, 200);
+  assert.match(db.headers.get('content-disposition') ?? '', /tokenmanager-my-backup-\d{4}-\d{2}-\d{2}\.db/);
+  const bytes = Buffer.from(await db.arrayBuffer());
+
+  const ok = await call('/backup/restore', 'alice@ionos.com', { method: 'POST', body: JSON.stringify({ db: bytes.toString('base64'), key: keyHex }) });
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).data.format, 'workspace');
+
+  const big = await call('/backup/restore', 'alice@ionos.com', { method: 'POST', body: JSON.stringify({ db: 'A'.repeat(2_000_000), key: keyHex }) });
+  assert.equal(big.status, 400); // reaches the restore code (not a backup), not a 413 from the 1mb limit
+  assert.equal((await big.json()).error.code, 'VALIDATION_ERROR');
+
+  const other = await call('/backup/restore', 'bob@ionos.com', { method: 'POST', body: JSON.stringify({ db: bytes.toString('base64'), key: keyHex }) });
+  assert.equal(other.status, 403);
+  assert.equal((await call('/tokens/alice-token', 'alice@ionos.com')).status, 200);
+});
+
 test('dismiss refuses an expired token whose IONOS user still exists', async () => {
   q.insertManagedToken(alice.db, {
     id: 'exp-live-user', account_id: aliceAcc, name: 'exp', description: null, ionos_token_id: 't2', ionos_user_id: 'u2',
