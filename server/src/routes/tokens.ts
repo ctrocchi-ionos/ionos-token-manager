@@ -1,11 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import * as db from '../db/queries.js';
+import * as q from '../workspace/queries.js';
 import * as tokenCreator from '../services/token-creator.js';
-import { getAdminTokenFor } from '../services/user-token.js';
+import { getAccountAdminToken } from '../services/dcd-accounts.js';
 import { ValidationError, NotFoundError } from '../middleware/error-handler.js';
 import { asyncHandler } from '../middleware/async-handler.js';
+import { requireAccount } from '../middleware/workspace.js';
 import { csvRow } from '../lib/csv.js';
+import { parsePaging } from '../lib/paging.js';
 
 const router = Router();
 
@@ -27,68 +29,47 @@ const createTokenSchema = z.object({
   cleanupOnDelete: z.boolean().optional(),
 });
 
-// Create a managed token
-router.post('/', asyncHandler(async (req: Request, res: Response) => {
+// Create a managed token in the selected DCD account
+router.post('/', requireAccount, asyncHandler(async (req: Request, res: Response) => {
   const parsed = createTokenSchema.safeParse(req.body);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid request', parsed.error.flatten());
-  }
-
-  const adminToken = getAdminTokenFor(req.user.email);
-  const result = await tokenCreator.createManagedToken(parsed.data, req.user.email, req.user.email, adminToken);
+  if (!parsed.success) throw new ValidationError('Invalid request', parsed.error.flatten());
+  const adminToken = getAccountAdminToken(req.ws, req.account.id);
+  const result = await tokenCreator.createManagedToken(req.ws, req.account.id, adminToken, parsed.data);
   res.status(201).json({ success: true, data: result });
 }));
 
-// List managed tokens
-router.get('/', (req: Request, res: Response) => {
-  const { status, search, page, limit } = req.query;
-  const result = db.listManagedTokens({
-    status: status as string | undefined,
-    search: search as string | undefined,
-    page: page ? parseInt(page as string, 10) : undefined,
-    limit: limit ? parseInt(limit as string, 10) : undefined,
-    ownerEmail: req.user.email,
+// List tokens of the selected account
+router.get('/', requireAccount, (req: Request, res: Response) => {
+  const { page, limit } = parsePaging(req.query);
+  q.markExpiredTokens(req.ws.db, req.account.id);
+  const result = q.listManagedTokens(req.ws.db, {
+    accountId: req.account.id,
+    status: req.query.status as string | undefined,
+    search: req.query.search as string | undefined,
+    page,
+    limit,
   });
-
-  // Auto-mark expired tokens
-  for (const token of result.items) {
-    if (token.status === 'active' && new Date(token.expires_at) <= new Date()) {
-      db.updateManagedTokenStatus(token.id, 'expired');
-      token.status = 'expired';
-    }
-  }
-
   res.json({
     success: true,
     data: result.items.map(tokenCreator.tokenToResponse),
-    pagination: {
-      total: result.total,
-      page: page ? parseInt(page as string, 10) : 1,
-      limit: limit ? parseInt(limit as string, 10) : 50,
-    },
+    pagination: { total: result.total, page, limit },
   });
 });
 
-// Get token stats
-router.get('/stats', (req: Request, res: Response) => {
-  const stats = db.getTokenStats(req.user.email);
-  res.json({ success: true, data: stats });
+router.get('/stats', requireAccount, (req: Request, res: Response) => {
+  q.markExpiredTokens(req.ws.db, req.account.id);
+  res.json({ success: true, data: q.getTokenStats(req.ws.db, req.account.id) });
 });
 
-// Export tokens
-router.get('/export', (req: Request, res: Response) => {
+router.get('/export', requireAccount, (req: Request, res: Response) => {
   const format = (req.query.format as string) || 'json';
-  const result = db.listManagedTokens({ limit: 10000, ownerEmail: req.user.email });
-  const tokens = result.items.map(tokenCreator.tokenToResponse);
+  const tokens = q.listManagedTokens(req.ws.db, { accountId: req.account.id, limit: 100000 }).items.map(tokenCreator.tokenToResponse);
 
   if (format === 'csv') {
-    const headers = csvRow(['ID', 'Name', 'Description', 'Status', 'Permissions', 'Created', 'Expires', 'Sub-User Email']) + '\n';
+    const headers = csvRow(['ID', 'Account', 'Name', 'Description', 'Status', 'Permissions', 'Created', 'Expires', 'Sub-User Email']) + '\n';
     const rows = tokens.map((t) => {
-      const perms = Object.entries(t.permissions)
-        .filter(([, v]) => v)
-        .map(([k]) => k)
-        .join(';');
-      return csvRow([t.id, t.name, t.description, t.status, perms, t.createdAt, t.expiresAt, t.subUserEmail]);
+      const perms = Object.entries(t.permissions).filter(([, v]) => v).map(([k]) => k).join(';');
+      return csvRow([t.id, req.account.label, t.name, t.description, t.status, perms, t.createdAt, t.expiresAt, t.subUserEmail]);
     }).join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=tokens.csv');
@@ -100,87 +81,67 @@ router.get('/export', (req: Request, res: Response) => {
   }
 });
 
-// Get single token
 router.get('/:id', (req: Request, res: Response) => {
   const id = req.params.id as string;
-  const token = db.getManagedTokenById(id, req.user.email);
+  q.markExpiredTokens(req.ws.db);
+  const token = q.getManagedTokenById(req.ws.db, id);
   if (!token) throw new NotFoundError('Token', id);
-
-  // Auto-mark expired
-  if (token.status === 'active' && new Date(token.expires_at) <= new Date()) {
-    db.updateManagedTokenStatus(token.id, 'expired');
-    token.status = 'expired';
-  }
-
   res.json({ success: true, data: tokenCreator.tokenToResponse(token) });
 });
 
-// Regenerate token
 router.post('/:id/regenerate', asyncHandler(async (req: Request, res: Response) => {
-  const id = req.params.id as string;
-  const token = db.getManagedTokenById(id, req.user.email);
-  if (!token) throw new NotFoundError('Token', id);
-
-  const adminToken = getAdminTokenFor(req.user.email);
-  const result = await tokenCreator.regenerateToken(id, req.user.email, adminToken);
+  const result = await tokenCreator.regenerateToken(req.ws, req.params.id as string);
   res.json({ success: true, data: result });
 }));
 
-// Revoke/delete token
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const id = req.params.id as string;
-  const token = db.getManagedTokenById(id, req.user.email);
-  if (!token) throw new NotFoundError('Token', id);
-
-  const adminToken = getAdminTokenFor(req.user.email);
-  await tokenCreator.revokeManagedToken(id, req.user.email, adminToken);
+  await tokenCreator.revokeManagedToken(req.ws, req.params.id as string);
   res.json({ success: true, data: { message: 'Token revoked' } });
 }));
 
-// Remove from local DB (for revoked/expired tokens already cleaned up)
-router.delete('/:id/dismiss', asyncHandler((req: Request, res: Response) => {
+// Remove from the list (only revoked or expired tokens)
+router.delete('/:id/dismiss', (req: Request, res: Response) => {
   const id = req.params.id as string;
-  const token = db.getManagedTokenById(id, req.user.email);
+  const token = q.getManagedTokenById(req.ws.db, id);
   if (!token) throw new NotFoundError('Token', id);
   if (token.status !== 'revoked' && token.status !== 'expired') {
     throw new ValidationError('Only revoked or expired tokens can be dismissed. Revoke it first.');
   }
-  db.deleteManagedToken(id);
-  db.insertAuditLog({ action: 'token.dismiss', entityType: 'token', entityId: id, actorEmail: req.user.email });
+  // An expired token whose IONOS user still exists must be revoked (which removes that user) first.
+  if (token.status === 'expired' && token.cleanup_on_delete === 1 && !token.cleaned_up_at) {
+    throw new ValidationError('Revoke it first (this removes its IONOS user)');
+  }
+  q.deleteManagedToken(req.ws.db, id);
+  q.insertAuditLog(req.ws.db, { action: 'token.dismiss', accountId: token.account_id, entityType: 'token', entityId: id });
   res.json({ success: true, data: { message: 'Token removed from list' } });
-}));
+});
 
-// Bulk delete
-router.post('/bulk-delete', asyncHandler(async (req: Request, res: Response) => {
-  const { criteria, ids } = req.body as { criteria?: string; ids?: string[] };
-
-  let tokensToDelete: string[] = [];
-
+router.post('/bulk-delete', requireAccount, asyncHandler(async (req: Request, res: Response) => {
+  const { criteria, ids } = (req.body ?? {}) as { criteria?: unknown; ids?: unknown };
+  let targets: string[];
   if (criteria === 'expired') {
-    const expired = db.getExpiredTokens(req.user.email);
-    const result = db.listManagedTokens({ status: 'expired', limit: 10000, ownerEmail: req.user.email });
-    tokensToDelete = [...expired.map((t) => t.id), ...result.items.map((t) => t.id)];
-    tokensToDelete = [...new Set(tokensToDelete)];
-  } else if (ids && Array.isArray(ids)) {
-    // Verify all supplied IDs belong to the caller before acting on them
-    tokensToDelete = ids.filter((id) => !!db.getManagedTokenById(id, req.user.email));
+    q.markExpiredTokens(req.ws.db, req.account.id);
+    targets = q.listManagedTokens(req.ws.db, { accountId: req.account.id, status: 'expired', limit: 100000 }).items.map((t) => t.id);
+  } else if (Array.isArray(ids) && ids.every((i) => typeof i === 'string')) {
+    // Only tokens of the selected account; ids from other accounts are ignored.
+    targets = (ids as string[]).filter((id) => {
+      const t = q.getManagedTokenById(req.ws.db, id);
+      return !!t && t.account_id === req.account.id;
+    });
   } else {
     throw new ValidationError('Provide criteria ("expired") or ids array');
   }
 
   let deleted = 0;
   const errors: string[] = [];
-  const adminToken = getAdminTokenFor(req.user.email);
-
-  for (const id of tokensToDelete) {
+  for (const id of targets) {
     try {
-      await tokenCreator.revokeManagedToken(id, req.user.email, adminToken);
+      await tokenCreator.revokeManagedToken(req.ws, id);
       deleted++;
     } catch (err) {
       errors.push(`${id}: ${err instanceof Error ? err.message : 'unknown'}`);
     }
   }
-
   res.json({ success: true, data: { deleted, errors } });
 }));
 

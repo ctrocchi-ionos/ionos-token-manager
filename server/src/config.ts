@@ -49,7 +49,6 @@ class Config {
   readonly dbPath: string;
   readonly dataDir: string;
   readonly projectRoot: string;
-  readonly adminEmails: string[];
   readonly proxySecret: string;
 
   constructor() {
@@ -64,11 +63,6 @@ class Config {
     this.host = processEnv.HOST || '0.0.0.0';
     this.projectRoot = resolve(__dirname, '..', '..');
 
-    // Who may download backups / restore the database. Empty = those endpoints are disabled.
-    this.adminEmails = (processEnv.ADMIN_EMAILS || '')
-      .split(',')
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
     // Shared secret the SSO proxy must send as X-Proxy-Secret. Empty = not enforced.
     this.proxySecret = processEnv.PROXY_SECRET || '';
 

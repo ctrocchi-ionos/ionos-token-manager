@@ -1,5 +1,4 @@
 import { createCipheriv, createDecipheriv, randomBytes, hkdfSync } from 'crypto';
-import { config } from '../config.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
@@ -34,12 +33,4 @@ export function decryptWith(key: Buffer, encryptedStr: string): string {
 export function deriveWorkspaceKey(masterKey: Buffer, workspaceId: string): Buffer {
   assertKey(masterKey);
   return Buffer.from(hkdfSync('sha256', masterKey, WORKSPACE_KEY_SALT, `workspace:${workspaceId}`, 32));
-}
-
-// Temporary wrappers for code not yet moved to workspaces. Deleted in Task 7.
-export function encrypt(plaintext: string): string {
-  return encryptWith(config.getEncryptionKey(), plaintext);
-}
-export function decrypt(encryptedStr: string): string {
-  return decryptWith(config.getEncryptionKey(), encryptedStr);
 }
