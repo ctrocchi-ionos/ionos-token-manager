@@ -81,8 +81,11 @@ test('an old whole-app backup restores only my own rows', () => {
   const path = join(dir, 'old.db');
   const legacyKey = randomBytes(32);
   buildLegacyDb(path, legacyKey);
+  // Every pre-upgrade user has this flag; the restore must still import (it clears and re-sets the flag)
+  alice.db.prepare("INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('legacy_migrated', 'then')").run();
   const r = restoreWorkspace(alice, readFileSync(path), legacyKey.toString('hex'));
   assert.equal(r.format, 'legacy');
+  assert.ok(alice.db.prepare("SELECT 1 FROM workspace_meta WHERE key = 'legacy_migrated'").get()); // set again afterwards
   assert.equal(r.tokens, 2); // a1, a2 (x1 skipped: unknown contract)
   assert.equal(r.skipped, 1);
   assert.ok(q.getManagedTokenById(alice.db, 'a1'));
@@ -131,7 +134,7 @@ test('a failed restore rolls back completely', async () => {
   db.prepare("UPDATE managed_tokens SET sub_user_password_enc = 'garbage' WHERE id = 'tok-rb'").run();
   db.close();
   q.insertPermissionTemplate(alice.db, { name: 'survivor', permissions: {} });
-  assert.throws(() => restoreWorkspace(alice, readFileSync(path), b.keyHex));
+  assert.throws(() => restoreWorkspace(alice, readFileSync(path), b.keyHex), /could not be restored; nothing was changed/);
   assert.ok(q.templateExistsByName(alice.db, 'survivor'));
   assert.ok(q.getManagedTokenById(alice.db, 'tok-rb'));
   rmSync(dir, { recursive: true, force: true });
@@ -143,6 +146,20 @@ test('a database that only looks like a backup is refused cleanly', () => {
   const db = new Database(path);
   db.exec("CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO workspace_meta VALUES ('owner_email', 'alice@ionos.com')");
   db.close();
-  assert.throws(() => restoreWorkspace(alice, readFileSync(path), 'a'.repeat(64)), /damaged or is not a Token Manager backup/);
+  const warn = console.warn;
+  console.warn = () => {}; // the unexpected-error warning is expected here
+  try {
+    assert.throws(() => restoreWorkspace(alice, readFileSync(path), 'a'.repeat(64)), /damaged or is not a Token Manager backup/);
+  } finally { console.warn = warn; }
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("the backup's owner email is compared after normalising it", async () => {
+  const { dir, file } = await snapshotWorkspace(alice);
+  const db = new Database(file);
+  db.prepare("UPDATE workspace_meta SET value = ' Alice@IONOS.com ' WHERE key = 'owner_email'").run();
+  db.close();
+  const bytes = readFileSync(file);
+  rmSync(dir, { recursive: true, force: true });
+  assert.equal(restoreWorkspace(alice, bytes, alice.key.toString('hex')).format, 'workspace');
 });

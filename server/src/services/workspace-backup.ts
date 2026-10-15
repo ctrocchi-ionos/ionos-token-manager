@@ -7,7 +7,7 @@ import { AppError, ValidationError } from '../middleware/error-handler.js';
 import { WORKSPACE_SCHEMA_VERSION } from '../workspace/schema.js';
 import { assertKeyWorks, hasColumn, hasTable, migrateOwner } from '../workspace/migrate-legacy.js';
 import * as q from '../workspace/queries.js';
-import type { Workspace } from '../workspace/registry.js';
+import { normalizeEmail, type Workspace } from '../workspace/registry.js';
 import type { AccountRow, AuditRow, TemplateRow, TokenRow } from '../workspace/types.js';
 
 export interface RestoreResult {
@@ -43,9 +43,12 @@ const wrongKey = () => new ValidationError('This key does not match this backup.
 const restoreFailed = (err: unknown) =>
   new ValidationError(`The backup could not be restored; nothing was changed. ${err instanceof Error ? err.message : ''}`.trim());
 
-function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: Buffer): RestoreResult {
+/** The import runs inside the caller's try/catch; the returned function builds the result after the commit, outside it. */
+type Finish = () => RestoreResult;
+
+function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: Buffer): Finish {
   const owner = (up.prepare("SELECT value FROM workspace_meta WHERE key = 'owner_email'").get() as { value: string } | undefined)?.value;
-  if (owner !== ws.email) throw new AppError('This backup belongs to another user.', 'FORBIDDEN', 403);
+  if (!owner || normalizeEmail(owner) !== ws.email) throw new AppError('This backup belongs to another user.', 'FORBIDDEN', 403);
   const version = (up.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number | null }).v ?? 0;
   if (version > WORKSPACE_SCHEMA_VERSION) {
     throw new ValidationError('This backup comes from a newer version of the app. Update this copy first.');
@@ -82,11 +85,11 @@ function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: B
   } catch (err) {
     throw restoreFailed(err);
   }
-  return { format: 'workspace', accounts: accounts.length, tokens: tokens.length, templates: templates.length, skipped: 0 };
+  return () => ({ format: 'workspace', accounts: accounts.length, tokens: tokens.length, templates: templates.length, skipped: 0 });
 }
 
 /** A backup made by the old single-database app (whole database + master key): import only the caller's rows. */
-function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buffer): RestoreResult {
+function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buffer): Finish {
   if (!hasColumn(up, 'managed_tokens', 'owner_email')) {
     throw new ValidationError('This backup is from a very old version and cannot be restored.');
   }
@@ -107,7 +110,7 @@ function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buff
   } catch (err) {
     throw restoreFailed(err);
   }
-  return { format: 'legacy', accounts: q.listAccounts(ws.db).length, tokens: counts.tokens, templates: countCustomTemplates(ws), skipped: counts.skipped };
+  return () => ({ format: 'legacy', accounts: q.listAccounts(ws.db).length, tokens: counts.tokens, templates: countCustomTemplates(ws), skipped: counts.skipped });
 }
 
 /** Replace the user's data with a backup (made on any copy of the app). Refuses, changing nothing, when anything is off. */
@@ -128,17 +131,19 @@ export function restoreWorkspace(ws: Workspace, file: Buffer, keyHex: string): R
       throw new ValidationError('This is not a Token Manager backup file.');
     }
 
-    let result: RestoreResult;
+    let finish: Finish;
     try {
-      if (hasTable(up, 'workspace_meta')) result = restoreFromWorkspaceBackup(ws, up, key);
-      else if (hasTable(up, 'managed_tokens')) result = restoreFromLegacyBackup(ws, up, key);
+      if (hasTable(up, 'workspace_meta')) finish = restoreFromWorkspaceBackup(ws, up, key);
+      else if (hasTable(up, 'managed_tokens')) finish = restoreFromLegacyBackup(ws, up, key);
       else throw new ValidationError('This is not a Token Manager backup file.');
     } catch (err) {
       if (err instanceof AppError) throw err;
+      console.warn('[Restore] Unexpected error while reading or importing a backup:', err);
       // A database that looks like ours but is missing tables or columns (damaged or hand-made)
       throw new ValidationError('This file is damaged or is not a Token Manager backup.');
     }
 
+    const result = finish();
     q.insertAuditLog(ws.db, { action: 'workspace.restore', details: { ...result } });
     return result;
   } finally {
