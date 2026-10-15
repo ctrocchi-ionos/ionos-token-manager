@@ -245,6 +245,12 @@ test('malformed JSON and oversized bodies still get their own 4xx answers', asyn
   assert.equal((await big.json()).error.code, 'PAYLOAD_TOO_LARGE');
 });
 
+test('a badly encoded URL is a 400, not a server error', async () => {
+  const r = await call('/tokens/%E0%A4%A', 'alice@ionos.com');
+  assert.equal(r.status, 400);
+  assert.equal((await r.json()).error.code, 'BAD_REQUEST');
+});
+
 test('the restore upload limit follows routing: a trailing slash or other letter case is not cut at 1mb', async () => {
   const keyHex = await (await call('/backup/key', 'alice@ionos.com')).text();
   for (const path of ['/backup/restore/', '/Backup/Restore']) {

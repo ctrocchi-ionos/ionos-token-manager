@@ -149,7 +149,7 @@ export function migrateOwner(legacy: Database.Database, ws: Workspace, master: B
       const match = SUB_USER_CONTRACT.exec(String(r.sub_user_email));
       if (!match) {
         skipped++;
-        console.warn(`[Migration] Skipped token ${r.id} of ${ws.email}: cannot tell its DCD contract`);
+        console.warn(`[Migration] Skipped token ${r.id} (IONOS user ${r.ionos_user_id}) of ${ws.email}: cannot tell its DCD contract`);
         continue;
       }
       let passwordEnc: string;
@@ -157,7 +157,7 @@ export function migrateOwner(legacy: Database.Database, ws: Workspace, master: B
         passwordEnc = encryptWith(ws.key, decryptWith(master, String(r.sub_user_password_enc)));
       } catch {
         skipped++;
-        console.warn(`[Migration] Skipped token ${r.id} of ${ws.email}: its stored password cannot be decrypted`);
+        console.warn(`[Migration] Skipped token ${r.id} (IONOS user ${r.ionos_user_id}) of ${ws.email}: its stored password cannot be decrypted`);
         continue;
       }
       q.insertTokenRow(ws.db, {

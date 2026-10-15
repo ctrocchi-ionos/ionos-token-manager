@@ -75,10 +75,10 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
-  // Body-parser errors (malformed JSON, payload too large): http-errors with a `type` and `expose`
-  const parserError = err as { status?: number; type?: unknown; expose?: unknown };
-  const status = parserError.status;
-  if (typeof parserError.type === 'string' && parserError.expose === true && status && status >= 400 && status < 500) {
+  // Request errors raised by Express itself (malformed JSON, body too large, badly encoded URL) carry a 4xx status.
+  // IONOS errors carry one too, but were answered above.
+  const status = (err as { status?: number }).status;
+  if (status && status >= 400 && status < 500) {
     res.status(status).json({
       success: false,
       error: { code: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST', message: status === 413 ? 'Request body too large' : 'Malformed request' },

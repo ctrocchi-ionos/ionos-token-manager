@@ -235,13 +235,20 @@ export default function Account() {
                           {u.createdDate ? formatDate(u.createdDate) : '—'}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => setDeleteTarget(u)}
-                            className="text-red-500 hover:text-red-700 p-1"
-                            title="Delete user from IONOS"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {u.possiblyFormerManaged ? (
+                            // The server refuses these: it may be a colleague's token user. Only DCD can remove it.
+                            <span className="text-xs text-gray-400" title="Created by the Token Manager, possibly by a colleague. Its owner revokes it, or remove it in DCD.">
+                              Remove in DCD
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setDeleteTarget(u)}
+                              className="text-red-500 hover:text-red-700 p-1"
+                              title="Delete user from IONOS"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
