@@ -10,6 +10,9 @@ A self-hosted web app for IONOS Cloud account owners who need to hand out scoped
 - **Permission templates** — save common permission sets so you don't repeat yourself
 - **Audit log** — every action is recorded (who created what, when, any errors)
 - **Account overview** — see all sub-users on your IONOS account and which tokens they belong to
+- **Private workspaces**: every signed-in user has their own database and key; nobody else can see their accounts, tokens, templates or audit log.
+- **Several DCD accounts**: connect every IONOS contract you manage and switch between them in the sidebar.
+- **Your own backups**: download your data + key, restore it on this or any other copy of the app.
 
 ## Who it's for
 
@@ -42,7 +45,7 @@ IONOS account owners or admins who want a simple dashboard to manage API access 
 
 4. **Open your browser** at `http://localhost:3000`
 
-5. **Complete setup** — on first run, the app shows a setup screen. Paste your IONOS API token (the owner or admin JWT from your DCD account) and click "Save & Continue".
+5. **Sign in and add a DCD account** — On first sign-in, add your first DCD account: a name and an admin API token. Add more later in **Settings → DCD accounts**.
 
 That's it. The token is stored encrypted and the app manages itself from there.
 
@@ -52,20 +55,18 @@ That's it. The token is stored encrypted and the app manages itself from there.
 2. Click your profile in the top-right corner
 3. Go to **Token Manager**
 4. Generate a new token (choose a long TTL — the app does **not** renew it; you will need to paste a new one before it expires)
-5. Copy the JWT and paste it into the setup screen
+5. Copy the JWT and paste it when you add the DCD account
 
 ### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATA_DIR` | `/data` | Directory for the database and encryption key. **Must be on a persistent volume.** |
+| `DATA_DIR` | `/data` | Holds the per-user workspaces, the master key fingerprint (`key-check`) and old migration files. **Must be on a persistent volume.** |
 | `PORT` | `3000` | Port the server listens on |
 | `HOST` | `0.0.0.0` | Interface to bind to |
-| `IONOS_API_TOKEN` | *(none)* | Optional. Provide the token via env var instead of the setup page |
-| `ENCRYPTION_KEY` | *(auto-generated)* | AES-256-GCM key (64 hex chars). Auto-generated and saved to `DATA_DIR/encryption.key` on first run |
+| `ENCRYPTION_KEY` | *(generated on a new install)* | Master key. Generated on a new install and added to `.env`; on the marketplace keep it in the app's `.env`. Never change it on an existing install. |
 | `PUBLIC_DIR` | `./public` | Path to the built frontend files (rarely needs changing) |
-| `PROXY_SECRET` | *(none)* | **Recommended in production.** Shared secret your SSO proxy must send as `X-Proxy-Secret`. Without it, anyone who can reach the port can claim any identity via `X-Auth-Email`. |
-| `ADMIN_EMAILS` | *(none)* | Comma-separated emails allowed to download backups and restore. Empty = backup/restore disabled. |
+| `PROXY_SECRET` | *(none)* | Optional. Shared secret your SSO proxy sends as `X-Proxy-Secret`. If set, it must be at least 32 characters (e.g. `openssl rand -hex 32`), otherwise the app refuses to start. Without it, anyone who can reach the port can claim any identity via `X-Auth-Email`. |
 | `EXPIRED_CLEANUP_GRACE_DAYS` | `7` | Days after expiry before the app deletes a token's IONOS sub-user and group (only for tokens created with cleanup on). `-1` turns it off. |
 | `LEGACY_OWNER_EMAIL` | *(none)* | Only for upgrading very old installs: owner to assign to rows created before per-user ownership. |
 
@@ -73,10 +74,10 @@ Local development (`npm run dev`) also reads `DEV_AUTH_EMAIL` from `.env` as a s
 
 ### Security notes
 
-- Backup, key download and restore require your email in `ADMIN_EMAILS` and are logged in the audit log.
-- Put the app behind your SSO proxy, bind it to localhost or a private network, and set `PROXY_SECRET`.
-- In production, provide `ENCRYPTION_KEY` from a secret store rather than keeping `encryption.key` next to the database.
-- No CORS: the UI must be served by the same server.
+- Runs behind the marketplace login.
+- All non-GET API calls need `X-Requested-With: token-manager` (the UI sends it).
+- Rate limits are per user.
+- Backups are per user; nobody can download anyone else's data.
 
 ### Tests
 
@@ -86,12 +87,20 @@ npm test -w server
 
 ### Data persistence
 
-Everything important is stored in `DATA_DIR`:
+- `DATA_DIR/workspaces/<id>/workspace.db`: one private database per user (`<id>` is a hash of their email).
+- `DATA_DIR/key-check`: a fingerprint of the master key. If the app starts with a missing or different key while data exists, it refuses to start instead of losing access.
+- `DATA_DIR/tokenmanager.db.migrated-<timestamp>`: the pre-workspace database, kept after the one-time migration. Delete it once you are happy.
+- The master key is `ENCRYPTION_KEY` in `.env`. Each user's data is encrypted with their own key derived from it.
 
-- **`tokenmanager.db`** — SQLite database with all token records, templates, and the audit log
-- **`encryption.key`** — AES-256-GCM key used to encrypt stored tokens
+### Backup and restore (per user)
 
-**Back up `DATA_DIR` regularly.** If you lose `encryption.key`, the encrypted tokens in the database become unreadable and you'll need to reconfigure.
+In **Settings → Backup & restore**, every user can download two files: **my database** and **my key**. Restore asks for both and replaces only your own data. It works across copies of the app: back up on the marketplace, restore on your PC, or the other way round. Keep the two files apart. Together they give access to your saved IONOS tokens.
+
+A backup belongs to the email it was made with. To restore it on your PC, set `DEV_AUTH_EMAIL` in your local `.env` to the same email you use on the marketplace.
+
+Backups made by older versions of the app (whole database + `encryption.key`) can also be restored; only your own data is taken from them.
+
+To remove a user's data entirely: stop the app and delete their `DATA_DIR/workspaces/<id>/` folder.
 
 ## Key features
 
@@ -110,9 +119,9 @@ The app creates an IONOS sub-user and a scoped token tied to that user. You get 
 
 Save a set of permissions as a template so you can reuse it. A few common ones are built in (read-only, CI/CD, etc.). You can create your own from the **Templates** page.
 
-### Admin token expiry
+### DCD account token expiry
 
-The app's own IONOS token (the one you pasted at setup) is checked against IONOS when you save it, but it is **not** renewed automatically. The Settings page shows how many days are left. Paste a fresh token before it expires.
+Each DCD account's token is checked against IONOS when you save it, but it is **not** renewed automatically. The sidebar and Settings show how many days are left for each account. Paste a fresh token before it expires.
 
 ### Audit log
 
@@ -120,7 +129,6 @@ Every operation is logged — token creation, deletion, renewal, errors. Find it
 
 ## Known limitations
 
-- **No built-in authentication.** Anyone who can reach port 3000 can use the app. If you expose it beyond localhost, put it behind a reverse proxy with HTTP Basic Auth or similar.
-- **One IONOS account per instance.** The app is tied to the token you configure at setup.
 - **Token values are shown once.** After creation, the raw token value is not stored — only the IONOS token ID. If a user loses their token, you'll need to regenerate it.
 - **Orphan tokens** (tokens on your IONOS account not created by this app) are visible in the Account page but cannot be deleted from here — you'll need to manage them in the IONOS DCD portal.
+- **IONOS users created by this tool (`tkn-*`) cannot be deleted from the Account page in the app.** Revoke the token instead.
