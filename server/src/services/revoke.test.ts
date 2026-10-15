@@ -105,3 +105,19 @@ test('sweep: cleans per workspace with that account, skips accounts whose token 
   assert.equal(q.getManagedTokenById(ws.db, 'old-dead')!.cleaned_up_at, null);
   assert.equal((await runExpiredSweep()).cleaned, 0); // idempotent
 });
+
+test('sweep: one broken workspace counts as failed, the others are still cleaned (keep this test last)', async () => {
+  deleteStatus = {};
+  const broken = openWorkspace('broken@ionos.com');
+  addTestAccount(broken, 300);
+  broken.db.close(); // any query on it now throws
+  addToken('old-2', { expires_at: ago(10), status: 'expired' });
+
+  const err = console.error;
+  console.error = () => {}; // the per-workspace error log is expected here
+  let r;
+  try { r = await runExpiredSweep(); } finally { console.error = err; }
+  assert.equal(r.failed, 1);
+  assert.equal(r.cleaned, 1);
+  assert.ok(q.getManagedTokenById(ws.db, 'old-2')!.cleaned_up_at);
+});

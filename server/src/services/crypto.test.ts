@@ -41,3 +41,9 @@ test('rejects keys that are not 32 bytes', () => {
   assert.throws(() => encryptWith(Buffer.alloc(16), 'x'), /32 bytes/);
   assert.throws(() => deriveWorkspaceKey(Buffer.alloc(16), 'ws'), /32 bytes/);
 });
+
+test('a truncated auth tag is rejected (only full 16-byte tags are accepted)', () => {
+  const [iv, tag, data] = encryptWith(master, 'hello world').split(':');
+  const short = Buffer.from(tag, 'base64').subarray(0, 4).toString('base64');
+  assert.throws(() => decryptWith(master, `${iv}:${short}:${data}`));
+});

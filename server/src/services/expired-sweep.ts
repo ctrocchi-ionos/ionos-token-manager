@@ -1,5 +1,5 @@
 import * as q from '../workspace/queries.js';
-import { listWorkspaceEmails, openWorkspace } from '../workspace/registry.js';
+import { listWorkspaceEmails, openWorkspace, type Workspace } from '../workspace/registry.js';
 import * as tokenCreator from './token-creator.js';
 import { getAccountAdminToken } from './dcd-accounts.js';
 
@@ -18,34 +18,43 @@ export async function runExpiredSweep(): Promise<{ cleaned: number; failed: numb
   if (!Number.isFinite(graceDays) || graceDays < 0) return result;
 
   for (const email of listWorkspaceEmails()) {
-    const ws = openWorkspace(email);
-    for (const token of q.getTokensDueForCleanup(ws.db, graceDays)) {
-      let adminToken: string;
-      try {
-        adminToken = getAccountAdminToken(ws, token.account_id);
-      } catch {
-        result.skipped++; // that DCD account has no usable admin token right now
-        continue;
-      }
-
-      const errors = await tokenCreator.cleanupIonosAccess(token, adminToken);
-      if (errors.length === 0) {
-        q.markTokenCleanedUp(ws.db, token.id);
-        q.insertAuditLog(ws.db, {
-          action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
-          details: { reason: 'expired', graceDays },
-        });
-        result.cleaned++;
-      } else {
-        q.insertAuditLog(ws.db, {
-          action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
-          success: false, errorMessage: errors.join('; '),
-        });
-        result.failed++;
-      }
+    try {
+      await sweepWorkspace(openWorkspace(email), graceDays, result);
+    } catch (err) {
+      // One unreadable workspace must not stop the sweep for everyone else
+      result.failed++;
+      console.error(`[Sweep] A workspace could not be swept: ${err instanceof Error ? err.message : err}`);
     }
   }
   return result;
+}
+
+async function sweepWorkspace(ws: Workspace, graceDays: number, result: { cleaned: number; failed: number; skipped: number }): Promise<void> {
+  for (const token of q.getTokensDueForCleanup(ws.db, graceDays)) {
+    let adminToken: string;
+    try {
+      adminToken = getAccountAdminToken(ws, token.account_id);
+    } catch {
+      result.skipped++; // that DCD account has no usable admin token right now
+      continue;
+    }
+
+    const errors = await tokenCreator.cleanupIonosAccess(token, adminToken);
+    if (errors.length === 0) {
+      q.markTokenCleanedUp(ws.db, token.id);
+      q.insertAuditLog(ws.db, {
+        action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
+        details: { reason: 'expired', graceDays },
+      });
+      result.cleaned++;
+    } else {
+      q.insertAuditLog(ws.db, {
+        action: 'token.auto_cleanup', accountId: token.account_id, entityType: 'token', entityId: token.id,
+        success: false, errorMessage: errors.join('; '),
+      });
+      result.failed++;
+    }
+  }
 }
 
 export function startExpiredSweep(): void {
