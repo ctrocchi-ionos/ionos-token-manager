@@ -50,8 +50,9 @@ function requireTables(up: Database.Database, names: string[]): void {
 function refuseOrphans(ws: Workspace, live: Array<{ id: string; name: string }>): void {
   const lost = live.filter((t) => !q.getManagedTokenById(ws.db, t.id));
   if (lost.length === 0) return;
+  const names = lost.slice(0, 5).map((t) => t.name).join(', ') + (lost.length > 5 ? `, and ${lost.length - 5} more` : '');
   throw new AppError(
-    `This backup does not contain ${lost.length} token(s) that still have a live IONOS user (${lost.map((t) => t.name).join(', ')}). `
+    `This backup does not contain ${lost.length} token(s) that still have a live IONOS user (${names}). `
       + 'Revoke them on the dashboard first, otherwise their IONOS users would stay behind and could no longer be removed from this app. '
       + 'Nothing was changed.',
     'RESTORE_WOULD_ORPHAN', 409, { tokens: lost },
