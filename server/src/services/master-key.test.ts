@@ -83,3 +83,36 @@ test('a legacy tokenmanager.db without any key: refuses, writes no key, leaves t
   assert.equal(readFileSync(p.dotEnvPath, 'utf-8'), 'DEV_AUTH_EMAIL=me@ionos.com\n');
   assert.equal(readFileSync(db, 'utf-8'), 'legacy-db-bytes');
 });
+
+/** A workspace file on disk (as the app writes it) whose one secret is encrypted with `master`'s workspace key. */
+async function workspaceOnDisk(dataDir: string, master: string, withSecret = true) {
+  const Database = (await import('better-sqlite3')).default;
+  const { workspaceIdFor } = await import('../workspace/registry.js');
+  const { initializeWorkspaceSchema } = await import('../workspace/schema.js');
+  const { deriveWorkspaceKey, encryptWith } = await import('./crypto.js');
+  const email = 'someone@ionos.com';
+  const id = workspaceIdFor(email);
+  mkdirSync(join(dataDir, 'workspaces', id), { recursive: true });
+  const db = new Database(join(dataDir, 'workspaces', id, 'workspace.db'));
+  initializeWorkspaceSchema(db);
+  db.prepare("INSERT INTO workspace_meta (key, value) VALUES ('owner_email', ?)").run(email);
+  if (withSecret) {
+    const enc = encryptWith(deriveWorkspaceKey(Buffer.from(master, 'hex'), id), 'admin-jwt');
+    db.prepare("INSERT INTO dcd_accounts (id, label, contract_number, token_enc) VALUES ('a', 'A', 1, ?)").run(enc);
+  }
+  db.close();
+}
+
+test('no fingerprint but workspaces exist: a key that cannot read their secrets is refused, nothing is written', async () => {
+  const p = place();
+  await workspaceOnDisk(p.dataDir, K1);
+  assert.throws(() => mk.verifyMasterKey(K2, p.dataDir), /cannot read the existing data/);
+  assert.ok(!existsSync(join(p.dataDir, 'key-check')));
+  mk.verifyMasterKey(K1, p.dataDir); // the right key passes, so it can then be recorded
+});
+
+test('no fingerprint and workspaces without any secret: nothing to check, the key is accepted', async () => {
+  const p = place();
+  await workspaceOnDisk(p.dataDir, K1, false);
+  mk.verifyMasterKey(K2, p.dataDir);
+});

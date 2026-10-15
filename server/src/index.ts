@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { exec } from 'child_process';
 import { config } from './config.js';
 import { assertSafeAuthConfig } from './middleware/sso-auth.js';
@@ -23,8 +23,15 @@ async function main() {
   migrateLegacyDatabase(); // a key that cannot read the old data: stop, change nothing
   recordMasterKey(key, config.dataDir);
   console.log(`[MasterKey] Key source: ${source}`);
-  if (source === 'env' && existsSync(`${config.dataDir}/encryption.key`)) {
-    console.warn('[MasterKey] DATA_DIR/encryption.key is no longer used (ENCRYPTION_KEY is set). Delete it once you have checked the values match.');
+  const keyFile = `${config.dataDir}/encryption.key`;
+  if (source === 'env' && existsSync(keyFile)) {
+    // The generator keeps this file on purpose, as a safety copy of the key in .env. Say so, and flag a stale copy.
+    if (readFileSync(keyFile, 'utf-8').trim() === key) {
+      console.log('[MasterKey] DATA_DIR/encryption.key is kept as a safety copy of ENCRYPTION_KEY (same value). The app uses ENCRYPTION_KEY.');
+    } else {
+      console.warn('[MasterKey] DATA_DIR/encryption.key differs from ENCRYPTION_KEY, so it is not a valid safety copy. '
+        + 'The app uses ENCRYPTION_KEY; put the same value in the file, and keep a copy somewhere safe.');
+    }
   }
 
   config.hardenDataDir();
