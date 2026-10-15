@@ -15,6 +15,9 @@ async function main() {
   config.hardenDataDir();
   startExpiredSweep();
 
+  if (!config.proxySecret) {
+    console.warn('[Security] PROXY_SECRET is not set: any client that can reach this port can claim any identity via X-Auth-Email. Bind to localhost or set PROXY_SECRET behind your SSO proxy.');
+  }
   if (process.env.DEV_AUTH_EMAIL && process.env.ALLOW_DEV_AUTH !== '1') {
     console.warn('[Security] DEV_AUTH_EMAIL is set but ignored (only used by `npm run dev`).');
   }

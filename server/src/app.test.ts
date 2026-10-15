@@ -93,8 +93,12 @@ test("a colleague's token sub-user (same contract, other workspace) cannot be de
 });
 
 test('backup and restore endpoints are gone', async () => {
-  assert.equal((await call('/admin/backup/key', 'alice@ionos.com')).status, 404);
-  assert.equal((await call('/admin/restore', 'alice@ionos.com', { method: 'POST', body: '{}' })).status, 404);
+  const key = await call('/admin/backup/key', 'alice@ionos.com');
+  assert.equal(key.status, 404);
+  assert.equal((await key.json()).error.code, 'NOT_FOUND');
+  const restore = await call('/admin/restore', 'alice@ionos.com', { method: 'POST', body: '{}' });
+  assert.equal(restore.status, 404);
+  assert.equal((await restore.json()).error.code, 'NOT_FOUND');
 });
 
 test('dismiss refuses an expired token whose IONOS user still exists', async () => {
