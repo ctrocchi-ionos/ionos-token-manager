@@ -63,7 +63,7 @@ export function openWorkspace(email: string): Workspace {
   return ws;
 }
 
-/** Owner emails of every workspace on disk (used by the background sweep and the backup CLI). */
+/** Owner emails of every workspace on disk (used by the background expiry sweep). */
 export function listWorkspaceEmails(): string[] {
   const root = workspacesRoot();
   if (!existsSync(root)) return [];
@@ -73,7 +73,7 @@ export function listWorkspaceEmails(): string[] {
     if (!existsSync(file)) continue;
     let db: Database.Database | undefined;
     try {
-      // One corrupt or locked file must not stop the sweep/backup for everyone else
+      // One corrupt or locked file must not stop the sweep for everyone else
       db = new Database(file, { readonly: true, fileMustExist: true });
       const owner = readOwner(db);
       if (owner && workspaceIdFor(owner) === id) emails.push(owner);

@@ -20,7 +20,9 @@ export function hasTable(db: Database.Database, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
+/** False for views too: an uploaded file could define a "table" as an expensive view, so only real tables are read. */
 export function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  if (!hasTable(db, table)) return false;
   return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((c) => c.name === column);
 }
 
@@ -81,7 +83,8 @@ export function migrateOwner(legacy: Database.Database, ws: Workspace, master: B
     const missing = ids.filter((r) => !q.getManagedTokenById(ws.db, r.id)).length;
     if (missing > 0) {
       console.warn(`[Migration] ${ws.email} was migrated before; ${missing} token(s) in the old file are not in their workspace. `
-        + 'They stay in the renamed old file; restore it from Settings (old whole-app backup) to bring them in.');
+        + 'They stay in the renamed old file. Restoring that file (Settings, old whole-app backup) REPLACES the user\'s current '
+        + 'data, so it is only safe after they revoke every token created since; the app refuses the restore until they do.');
     }
     return { tokens: 0, skipped: missing };
   }
@@ -155,9 +158,10 @@ export function migrateOwner(legacy: Database.Database, ws: Workspace, master: B
     }
 
     // 3. Custom templates (before per-user templates existed, every custom template was shared: copy to everyone)
-    const tpls = (hasColumn(legacy, 'permission_templates', 'owner_email')
-      ? legacy.prepare(`SELECT * FROM permission_templates WHERE is_builtin = 0 AND ${ownerFilter}`).all(ws.email)
-      : legacy.prepare('SELECT * FROM permission_templates WHERE is_builtin = 0').all()) as Row[];
+    const tpls = (!hasTable(legacy, 'permission_templates') ? []
+      : hasColumn(legacy, 'permission_templates', 'owner_email')
+        ? legacy.prepare(`SELECT * FROM permission_templates WHERE is_builtin = 0 AND ${ownerFilter}`).all(ws.email)
+        : legacy.prepare('SELECT * FROM permission_templates WHERE is_builtin = 0').all()) as Row[];
     for (const t of tpls) {
       q.insertTemplateRow(ws.db, {
         id: String(t.id), name: String(t.name), description: t.description as string | null, permissions: String(t.permissions),

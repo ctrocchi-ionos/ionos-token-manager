@@ -83,6 +83,11 @@ test('an old whole-app backup restores only my own rows', () => {
   buildLegacyDb(path, legacyKey);
   // Every pre-upgrade user has this flag; the restore must still import (it clears and re-sets the flag)
   alice.db.prepare("INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('legacy_migrated', 'then')").run();
+  // tok-1 still has a live IONOS user and is not in the old backup: refused until it is revoked
+  assert.throws(() => restoreWorkspace(alice, readFileSync(path), legacyKey.toString('hex')),
+    (e: any) => e.code === 'RESTORE_WOULD_ORPHAN' && e.statusCode === 409);
+  assert.equal(q.getManagedTokenById(alice.db, 'tok-1')!.status, 'active'); // nothing changed
+  q.updateManagedTokenStatus(alice.db, 'tok-1', 'revoked');
   const r = restoreWorkspace(alice, readFileSync(path), legacyKey.toString('hex'));
   assert.equal(r.format, 'legacy');
   assert.ok(alice.db.prepare("SELECT 1 FROM workspace_meta WHERE key = 'legacy_migrated'").get()); // set again afterwards
@@ -162,4 +167,43 @@ test("the backup's owner email is compared after normalising it", async () => {
   const bytes = readFileSync(file);
   rmSync(dir, { recursive: true, force: true });
   assert.equal(restoreWorkspace(alice, bytes, alice.key.toString('hex')).format, 'workspace');
+});
+
+test('a restore that would drop a token whose IONOS user still exists is refused; allowed once it is revoked', async () => {
+  const b = await backupFromAnotherCopy(); // made before 'tok-new' existed
+  q.insertManagedToken(alice.db, {
+    id: 'tok-new', account_id: q.listAccounts(alice.db)[0].id, name: 'newer', description: null, ionos_token_id: 't', ionos_user_id: 'u-new', ionos_group_id: 'g',
+    sub_user_email: 'tkn-new@c4000.tokenmanager.internal', sub_user_password_enc: encryptWith(alice.key, 'pw-new'),
+    permissions: '{}', shared_resources: '[]', template_id: null, ttl_seconds: 60,
+    expires_at: new Date(Date.now() + 3600_000).toISOString(), status: 'active', cleanup_on_delete: 1,
+  });
+  q.insertPermissionTemplate(alice.db, { name: 'made-after-backup', permissions: {} });
+  const auditBefore = q.listAuditLog(alice.db, {}).total;
+
+  assert.throws(() => restoreWorkspace(alice, b.file, b.keyHex), (e: any) =>
+    e.code === 'RESTORE_WOULD_ORPHAN' && e.statusCode === 409 && /1 token/.test(e.message) && /[Rr]evoke/.test(e.message));
+  assert.equal(q.getManagedTokenById(alice.db, 'tok-new')!.status, 'active'); // nothing changed
+  assert.ok(q.templateExistsByName(alice.db, 'made-after-backup'));
+  assert.equal(q.listAuditLog(alice.db, {}).total, auditBefore);
+
+  // Expired but not cleaned up yet: its IONOS user still exists, so it still blocks
+  q.updateManagedTokenStatus(alice.db, 'tok-new', 'expired');
+  assert.throws(() => restoreWorkspace(alice, b.file, b.keyHex), (e: any) => e.code === 'RESTORE_WOULD_ORPHAN');
+
+  q.updateManagedTokenStatus(alice.db, 'tok-new', 'revoked');
+  assert.equal(restoreWorkspace(alice, b.file, b.keyHex).format, 'workspace');
+  assert.equal(q.getManagedTokenById(alice.db, 'tok-new'), undefined);
+});
+
+test('a backup whose dcd_accounts is a VIEW is refused cleanly and nothing changes', async () => {
+  const { dir, file } = await snapshotWorkspace(alice);
+  const db = new Database(file);
+  db.exec('ALTER TABLE dcd_accounts RENAME TO real_accounts; CREATE VIEW dcd_accounts AS SELECT * FROM real_accounts;');
+  db.close();
+  const bytes = readFileSync(file);
+  rmSync(dir, { recursive: true, force: true });
+  q.insertPermissionTemplate(alice.db, { name: 'view-survivor', permissions: {} });
+  assert.throws(() => restoreWorkspace(alice, bytes, alice.key.toString('hex')),
+    (e: any) => e.statusCode === 400 && /damaged or is not a Token Manager backup/.test(e.message));
+  assert.ok(q.templateExistsByName(alice.db, 'view-survivor'));
 });

@@ -38,10 +38,17 @@ export function renameAccount(db: DB, id: string, label: string): void {
 }
 
 /** Tokens whose IONOS sub-user still exists: active ones, and expired ones not yet cleaned up. */
+/** Tokens whose IONOS sub-user still exists: active, or expired but not cleaned up yet. */
+const HOLDS_IONOS_ACCESS = "(status = 'active' OR (status = 'expired' AND cleanup_on_delete = 1 AND cleaned_up_at IS NULL))";
+
 export function countTokensHoldingIonosAccess(db: DB, accountId: string): number {
-  return (db.prepare(`SELECT COUNT(*) AS c FROM managed_tokens WHERE account_id = ? AND (
-      status = 'active' OR (status = 'expired' AND cleanup_on_delete = 1 AND cleaned_up_at IS NULL))`)
+  return (db.prepare(`SELECT COUNT(*) AS c FROM managed_tokens WHERE account_id = ? AND ${HOLDS_IONOS_ACCESS}`)
     .get(accountId) as { c: number }).c;
+}
+
+/** Every token in the workspace whose IONOS sub-user still exists (same rule as above, all accounts). */
+export function listTokensHoldingIonosAccess(db: DB): Array<{ id: string; name: string }> {
+  return db.prepare(`SELECT id, name FROM managed_tokens WHERE ${HOLDS_IONOS_ACCESS} ORDER BY created_at`).all() as Array<{ id: string; name: string }>;
 }
 
 export function deleteAccount(db: DB, id: string): void {

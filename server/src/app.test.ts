@@ -168,3 +168,39 @@ test('bulk-delete by ids ignores tokens of another account in the same workspace
   assert.equal(q.getManagedTokenById(alice.db, 'other-acc-token')!.status, 'active');
   assert.ok(!calls.slice(before).some((c) => c.includes('other-user')));
 });
+
+async function downloadBackup(user: string): Promise<string> {
+  const key = await (await call('/backup/key', user)).text();
+  const db = Buffer.from(await (await call('/backup/db', user)).arrayBuffer());
+  return JSON.stringify({ db: db.toString('base64'), key });
+}
+
+test('restore is refused with 409 while a newer token still has a live IONOS user', async () => {
+  const backup = await downloadBackup('alice@ionos.com');
+  q.insertManagedToken(alice.db, {
+    id: 'after-backup', account_id: aliceAcc, name: 'made-later', description: null, ionos_token_id: 't5', ionos_user_id: 'u5',
+    ionos_group_id: 'g5', sub_user_email: 'e5@c1000.tokenmanager.internal', sub_user_password_enc: encryptWith(alice.key, 'pw'),
+    permissions: '{}', shared_resources: '[]', template_id: null, ttl_seconds: 60,
+    expires_at: new Date(Date.now() + 3600_000).toISOString(), status: 'active', cleanup_on_delete: 1,
+  });
+  const r = await call('/backup/restore', 'alice@ionos.com', { method: 'POST', body: backup });
+  assert.equal(r.status, 409);
+  const body = await r.json();
+  assert.equal(body.success, false);
+  assert.equal(body.error.code, 'RESTORE_WOULD_ORPHAN');
+  assert.deepEqual(body.error.details.tokens, [{ id: 'after-backup', name: 'made-later' }]);
+  assert.equal((await call('/tokens/after-backup', 'alice@ionos.com')).status, 200); // nothing changed
+});
+
+test('a user with no DCD account can restore their backup (fresh copy of the app)', async () => {
+  const erin = openWorkspace('erin@ionos.com');
+  const acc = addTestAccount(erin, 2500);
+  const backup = await downloadBackup('erin@ionos.com');
+  q.deleteAccount(erin.db, acc); // as on a fresh copy: no account yet
+  assert.deepEqual((await (await call('/dcd-accounts', 'erin@ionos.com')).json()).data, []);
+
+  const r = await call('/backup/restore', 'erin@ionos.com', { method: 'POST', body: backup });
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).data.accounts, 1);
+  assert.equal((await (await call('/dcd-accounts', 'erin@ionos.com')).json()).data.length, 1);
+});

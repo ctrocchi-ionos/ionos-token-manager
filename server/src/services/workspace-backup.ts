@@ -38,6 +38,26 @@ function countCustomTemplates(ws: Workspace): number {
   return (ws.db.prepare('SELECT COUNT(*) AS c FROM permission_templates WHERE is_builtin = 0').get() as { c: number }).c;
 }
 
+/** Only real tables are read from an uploaded file: a view with the same name could run an endless query. */
+function requireTables(up: Database.Database, names: string[]): void {
+  if (names.some((n) => !hasTable(up, n))) throw new ValidationError('This file is damaged or is not a Token Manager backup.');
+}
+
+/**
+ * Run inside the restore transaction, after the import: a token whose IONOS sub-user still exists must not lose
+ * its row, or nothing in the app could ever remove that IONOS user again. Throwing rolls the whole restore back.
+ */
+function refuseOrphans(ws: Workspace, live: Array<{ id: string; name: string }>): void {
+  const lost = live.filter((t) => !q.getManagedTokenById(ws.db, t.id));
+  if (lost.length === 0) return;
+  throw new AppError(
+    `This backup does not contain ${lost.length} token(s) that still have a live IONOS user (${lost.map((t) => t.name).join(', ')}). `
+      + 'Revoke them on the dashboard first, otherwise their IONOS users would stay behind and could no longer be removed from this app. '
+      + 'Nothing was changed.',
+    'RESTORE_WOULD_ORPHAN', 409, { tokens: lost },
+  );
+}
+
 const wrongKey = () => new ValidationError('This key does not match this backup. Use the key file downloaded together with it.');
 
 const restoreFailed = (err: unknown) =>
@@ -45,8 +65,10 @@ const restoreFailed = (err: unknown) =>
 
 /** The import runs inside the caller's try/catch; the returned function builds the result after the commit, outside it. */
 type Finish = () => RestoreResult;
+type LiveTokens = Array<{ id: string; name: string }>;
 
-function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: Buffer): Finish {
+function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: Buffer, live: LiveTokens): Finish {
+  requireTables(up, ['workspace_meta', 'schema_version', 'dcd_accounts', 'managed_tokens', 'permission_templates', 'audit_log']);
   const owner = (up.prepare("SELECT value FROM workspace_meta WHERE key = 'owner_email'").get() as { value: string } | undefined)?.value;
   if (!owner || normalizeEmail(owner) !== ws.email) throw new AppError('This backup belongs to another user.', 'FORBIDDEN', 403);
   const version = (up.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number | null }).v ?? 0;
@@ -81,15 +103,18 @@ function restoreFromWorkspaceBackup(ws: Workspace, up: Database.Database, key: B
       const insAud = ws.db.prepare(`INSERT INTO audit_log (account_id, action, entity_type, entity_id, details, success, error_message, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const e of audit) insAud.run(e.account_id, e.action, e.entity_type, e.entity_id, e.details, e.success, e.error_message, e.created_at);
+      refuseOrphans(ws, live);
     })();
   } catch (err) {
+    if (err instanceof AppError) throw err;
     throw restoreFailed(err);
   }
   return () => ({ format: 'workspace', accounts: accounts.length, tokens: tokens.length, templates: templates.length, skipped: 0 });
 }
 
 /** A backup made by the old single-database app (whole database + master key): import only the caller's rows. */
-function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buffer): Finish {
+function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buffer, live: LiveTokens): Finish {
+  requireTables(up, ['managed_tokens', 'permission_templates']);
   if (!hasColumn(up, 'managed_tokens', 'owner_email')) {
     throw new ValidationError('This backup is from a very old version and cannot be restored.');
   }
@@ -106,8 +131,10 @@ function restoreFromLegacyBackup(ws: Workspace, up: Database.Database, key: Buff
       // Clear the flag so migrateOwner imports; it sets the flag again itself.
       ws.db.prepare("DELETE FROM workspace_meta WHERE key = 'legacy_migrated'").run();
       counts = migrateOwner(up, ws, key, false); // nested transaction = savepoint
+      refuseOrphans(ws, live);
     })();
   } catch (err) {
+    if (err instanceof AppError) throw err;
     throw restoreFailed(err);
   }
   return () => ({ format: 'legacy', accounts: q.listAccounts(ws.db).length, tokens: counts.tokens, templates: countCustomTemplates(ws), skipped: counts.skipped });
@@ -126,15 +153,18 @@ export function restoreWorkspace(ws: Workspace, file: Buffer, keyHex: string): R
     writeFileSync(path, file);
     try {
       up = new Database(path, { readonly: true, fileMustExist: true });
+      up.pragma('trusted_schema = OFF'); // the file is untrusted: no side-effect functions from its schema
       up.prepare('SELECT COUNT(*) FROM sqlite_master').get();
     } catch {
       throw new ValidationError('This is not a Token Manager backup file.');
     }
 
+    // Tokens whose IONOS user still exists right now: the restore must keep a row for each of them
+    const live = q.listTokensHoldingIonosAccess(ws.db);
     let finish: Finish;
     try {
-      if (hasTable(up, 'workspace_meta')) finish = restoreFromWorkspaceBackup(ws, up, key);
-      else if (hasTable(up, 'managed_tokens')) finish = restoreFromLegacyBackup(ws, up, key);
+      if (hasTable(up, 'workspace_meta')) finish = restoreFromWorkspaceBackup(ws, up, key, live);
+      else if (hasTable(up, 'managed_tokens')) finish = restoreFromLegacyBackup(ws, up, key, live);
       else throw new ValidationError('This is not a Token Manager backup file.');
     } catch (err) {
       if (err instanceof AppError) throw err;

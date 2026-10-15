@@ -100,7 +100,9 @@ A backup belongs to the email it was made with. To restore it on your PC, set `D
 
 Backups made by older versions of the app (whole database + `encryption.key`) can also be restored; only your own data is taken from them.
 
-To remove a user's data entirely: stop the app and delete their `DATA_DIR/workspaces/<id>/` folder.
+Restore replaces your current data. If you created tokens after the backup was made and they still have a live IONOS user, the restore is refused until you revoke them on the dashboard; otherwise their IONOS users would stay behind with nothing left in the app to remove them.
+
+To remove a user's data entirely: first have them revoke their tokens (or remove them yourself in the DCD console), because deleting the folder does not touch IONOS and their `tkn-*` IONOS users would stay behind. Then stop the app and delete their `DATA_DIR/workspaces/<id>/` folder.
 
 ## Key features
 
