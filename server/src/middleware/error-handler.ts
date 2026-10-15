@@ -49,6 +49,16 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
+  // Body-parser errors (malformed JSON, payload too large) carry a 4xx status
+  const status = (err as { status?: number }).status;
+  if (status && status >= 400 && status < 500) {
+    res.status(status).json({
+      success: false,
+      error: { code: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'BAD_REQUEST', message: status === 413 ? 'Request body too large' : 'Malformed request' },
+    });
+    return;
+  }
+
   console.error('Unhandled error:', err.message, err.stack);
   res.status(500).json({
     success: false,

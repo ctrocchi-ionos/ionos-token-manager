@@ -11,7 +11,7 @@ import type {
 
 // ── Managed Tokens ──
 
-export function insertManagedToken(token: Omit<ManagedToken, 'created_at' | 'last_regenerated_at'>): void {
+export function insertManagedToken(token: Omit<ManagedToken, 'created_at' | 'last_regenerated_at' | 'cleaned_up_at'>): void {
   const db = getDb();
   db.prepare(`
     INSERT INTO managed_tokens (id, name, description, ionos_token_id, ionos_user_id, ionos_group_id,
@@ -98,6 +98,21 @@ export function deleteManagedToken(id: string): void {
   db.prepare('DELETE FROM managed_tokens WHERE id = ?').run(id);
 }
 
+/** Expired tokens whose IONOS user/group still exist and are due for automatic cleanup. */
+export function getTokensDueForCleanup(graceDays: number): ManagedToken[] {
+  const db = getDb();
+  return db.prepare(
+    `SELECT * FROM managed_tokens
+     WHERE status IN ('active', 'expired') AND cleanup_on_delete = 1 AND cleaned_up_at IS NULL
+       AND datetime(expires_at) <= datetime('now', ?)`
+  ).all(`-${Math.max(0, Math.floor(graceDays))} days`) as ManagedToken[];
+}
+
+export function markTokenCleanedUp(id: string): void {
+  const db = getDb();
+  db.prepare("UPDATE managed_tokens SET status = 'expired', cleaned_up_at = datetime('now') WHERE id = ?").run(id);
+}
+
 export function getExpiredTokens(ownerEmail?: string): ManagedToken[] {
   const db = getDb();
   if (ownerEmail) {
@@ -128,17 +143,19 @@ export function insertPermissionTemplate(template: {
   permissions: PermissionFlags;
   sharedResourceTypes?: string[];
   isBuiltin?: boolean;
+  ownerEmail?: string;
 }): PermissionTemplate {
   const db = getDb();
   const id = uuidv4();
   db.prepare(`
-    INSERT INTO permission_templates (id, name, description, permissions, shared_resource_types, is_builtin)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO permission_templates (id, name, description, permissions, shared_resource_types, is_builtin, owner_email)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, template.name, template.description ?? null,
     JSON.stringify(template.permissions),
     JSON.stringify(template.sharedResourceTypes ?? []),
     template.isBuiltin ? 1 : 0,
+    template.isBuiltin ? null : (template.ownerEmail ?? null),
   );
   return getPermissionTemplateById(id)!;
 }
@@ -148,9 +165,12 @@ export function getPermissionTemplateById(id: string): PermissionTemplate | unde
   return db.prepare('SELECT * FROM permission_templates WHERE id = ?').get(id) as PermissionTemplate | undefined;
 }
 
-export function listPermissionTemplates(): PermissionTemplate[] {
+/** Built-in templates plus the caller's own custom ones. */
+export function listPermissionTemplates(ownerEmail: string): PermissionTemplate[] {
   const db = getDb();
-  return db.prepare('SELECT * FROM permission_templates ORDER BY is_builtin DESC, name ASC').all() as PermissionTemplate[];
+  return db.prepare(
+    'SELECT * FROM permission_templates WHERE is_builtin = 1 OR owner_email = ? ORDER BY is_builtin DESC, name ASC'
+  ).all(ownerEmail) as PermissionTemplate[];
 }
 
 export function updatePermissionTemplate(id: string, update: {

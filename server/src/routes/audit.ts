@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import * as db from '../db/queries.js';
 import type { AuditLogResponse } from '../types/app.js';
+import { csvRow } from '../lib/csv.js';
 
 const router = Router();
 
@@ -49,9 +50,9 @@ router.get('/export', (req: Request, res: Response) => {
   const entries = result.items.map(entryToResponse);
 
   if (format === 'csv') {
-    const headers = 'ID,Action,Entity Type,Entity ID,Success,Error,Created At\n';
+    const headers = csvRow(['ID', 'Action', 'Entity Type', 'Entity ID', 'Success', 'Error', 'Created At']) + '\n';
     const rows = entries.map((e) =>
-      `${e.id},"${e.action}","${e.entityType ?? ''}","${e.entityId ?? ''}",${e.success},"${e.errorMessage ?? ''}","${e.createdAt}"`
+      csvRow([e.id, e.action, e.entityType, e.entityId, e.success, e.errorMessage, e.createdAt])
     ).join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=audit-log.csv');

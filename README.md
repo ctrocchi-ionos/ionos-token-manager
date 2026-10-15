@@ -6,7 +6,7 @@ A self-hosted web app for IONOS Cloud account owners who need to hand out scoped
 
 - **Create scoped tokens** — each token gets its own IONOS sub-user with only the permissions you choose (read VMs, manage DNS, etc.)
 - **Set an expiry** — tokens expire automatically; the app tracks their status
-- **Auto-renew the admin token** — the app keeps its own session alive in the background
+- **Automatic cleanup** — expired tokens' sub-users and groups are removed after a grace period (default 7 days)
 - **Permission templates** — save common permission sets so you don't repeat yourself
 - **Audit log** — every action is recorded (who created what, when, any errors)
 - **Account overview** — see all sub-users on your IONOS account and which tokens they belong to
@@ -51,7 +51,7 @@ That's it. The token is stored encrypted and the app manages itself from there.
 1. Log in to [DCD (IONOS Data Center Designer)](https://dcd.ionos.com)
 2. Click your profile in the top-right corner
 3. Go to **Token Manager**
-4. Generate a new token (choose a long TTL — the app will auto-renew it)
+4. Generate a new token (choose a long TTL — the app does **not** renew it; you will need to paste a new one before it expires)
 5. Copy the JWT and paste it into the setup screen
 
 ### Environment variables
@@ -64,6 +64,25 @@ That's it. The token is stored encrypted and the app manages itself from there.
 | `IONOS_API_TOKEN` | *(none)* | Optional. Provide the token via env var instead of the setup page |
 | `ENCRYPTION_KEY` | *(auto-generated)* | AES-256-GCM key (64 hex chars). Auto-generated and saved to `DATA_DIR/encryption.key` on first run |
 | `PUBLIC_DIR` | `./public` | Path to the built frontend files (rarely needs changing) |
+| `PROXY_SECRET` | *(none)* | **Recommended in production.** Shared secret your SSO proxy must send as `X-Proxy-Secret`. Without it, anyone who can reach the port can claim any identity via `X-Auth-Email`. |
+| `ADMIN_EMAILS` | *(none)* | Comma-separated emails allowed to download backups and restore. Empty = backup/restore disabled. |
+| `EXPIRED_CLEANUP_GRACE_DAYS` | `7` | Days after expiry before the app deletes a token's IONOS sub-user and group (only for tokens created with cleanup on). `-1` turns it off. |
+| `LEGACY_OWNER_EMAIL` | *(none)* | Only for upgrading very old installs: owner to assign to rows created before per-user ownership. |
+
+Local development (`npm run dev`) also reads `DEV_AUTH_EMAIL` from `.env` as a stand-in for the SSO proxy. It is ignored by `npm start`.
+
+### Security notes
+
+- Backup, key download and restore require your email in `ADMIN_EMAILS` and are logged in the audit log.
+- Put the app behind your SSO proxy, bind it to localhost or a private network, and set `PROXY_SECRET`.
+- In production, provide `ENCRYPTION_KEY` from a secret store rather than keeping `encryption.key` next to the database.
+- No CORS: the UI must be served by the same server.
+
+### Tests
+
+```
+npm test -w server
+```
 
 ### Data persistence
 
@@ -91,9 +110,9 @@ The app creates an IONOS sub-user and a scoped token tied to that user. You get 
 
 Save a set of permissions as a template so you can reuse it. A few common ones are built in (read-only, CI/CD, etc.). You can create your own from the **Templates** page.
 
-### Admin token auto-renewal
+### Admin token expiry
 
-The app's own IONOS token (the one you pasted at setup) will auto-renew before it expires. You can configure the renewal window and TTL on the **Settings** page.
+The app's own IONOS token (the one you pasted at setup) is checked against IONOS when you save it, but it is **not** renewed automatically. The Settings page shows how many days are left. Paste a fresh token before it expires.
 
 ### Audit log
 

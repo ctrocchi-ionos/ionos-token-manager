@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, readdirSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -45,6 +45,8 @@ class Config {
   readonly dbPath: string;
   readonly dataDir: string;
   readonly projectRoot: string;
+  readonly adminEmails: string[];
+  readonly proxySecret: string;
 
   constructor() {
     const env = loadEnv();
@@ -57,6 +59,14 @@ class Config {
     this.port = parseInt(processEnv.PORT || '3000', 10);
     this.host = processEnv.HOST || '0.0.0.0';
     this.projectRoot = resolve(__dirname, '..', '..');
+
+    // Who may download backups / restore the database. Empty = those endpoints are disabled.
+    this.adminEmails = (processEnv.ADMIN_EMAILS || '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    // Shared secret the SSO proxy must send as X-Proxy-Secret. Empty = not enforced.
+    this.proxySecret = processEnv.PROXY_SECRET || '';
 
     this.dataDir = processEnv.DATA_DIR || resolve(__dirname, '..', 'data');
     this.dbPath = join(this.dataDir, 'tokenmanager.db');
@@ -72,7 +82,7 @@ class Config {
 
     if (!this.encryptionKey) {
       this.encryptionKey = randomBytes(32).toString('hex');
-      writeFileSync(keyFile, this.encryptionKey, 'utf-8');
+      writeFileSync(keyFile, this.encryptionKey, { encoding: 'utf-8', mode: 0o600 });
       console.warn('\n' + '!'.repeat(60));
       console.warn('  AUTO-GENERATED ENCRYPTION KEY');
       console.warn(`  Saved to: ${keyFile}`);
@@ -83,6 +93,19 @@ class Config {
 
     if (this.encryptionKey.length !== 64) {
       throw new Error('ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
+    }
+  }
+
+  /** Restrict the data directory and everything in it to the current user. */
+  hardenDataDir(): void {
+    try {
+      chmodSync(this.dataDir, 0o700);
+      for (const f of readdirSync(this.dataDir)) {
+        if (f === '.gitkeep') continue;
+        try { chmodSync(join(this.dataDir, f), 0o600); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      console.warn('[Config] Could not restrict data directory permissions:', err instanceof Error ? err.message : err);
     }
   }
 

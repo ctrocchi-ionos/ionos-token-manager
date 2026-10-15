@@ -5,6 +5,7 @@ import * as tokenCreator from '../services/token-creator.js';
 import { getAdminTokenFor } from '../services/user-token.js';
 import { ValidationError, NotFoundError } from '../middleware/error-handler.js';
 import { asyncHandler } from '../middleware/async-handler.js';
+import { csvRow } from '../lib/csv.js';
 
 const router = Router();
 
@@ -81,13 +82,13 @@ router.get('/export', (req: Request, res: Response) => {
   const tokens = result.items.map(tokenCreator.tokenToResponse);
 
   if (format === 'csv') {
-    const headers = 'ID,Name,Description,Status,Permissions,Created,Expires,Sub-User Email\n';
+    const headers = csvRow(['ID', 'Name', 'Description', 'Status', 'Permissions', 'Created', 'Expires', 'Sub-User Email']) + '\n';
     const rows = tokens.map((t) => {
       const perms = Object.entries(t.permissions)
         .filter(([, v]) => v)
         .map(([k]) => k)
         .join(';');
-      return `"${t.id}","${t.name}","${t.description ?? ''}","${t.status}","${perms}","${t.createdAt}","${t.expiresAt}","${t.subUserEmail}"`;
+      return csvRow([t.id, t.name, t.description, t.status, perms, t.createdAt, t.expiresAt, t.subUserEmail]);
     }).join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=tokens.csv');

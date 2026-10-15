@@ -14,6 +14,7 @@ function templateToResponse(t: ReturnType<typeof db.getPermissionTemplateById> &
     permissions: JSON.parse(t.permissions),
     sharedResourceTypes: JSON.parse(t.shared_resource_types),
     isBuiltin: t.is_builtin === 1,
+    ownerEmail: t.owner_email,
     createdAt: t.created_at,
     updatedAt: t.updated_at,
   };
@@ -27,8 +28,8 @@ const createTemplateSchema = z.object({
 });
 
 // List templates
-router.get('/', (_req: Request, res: Response) => {
-  const templates = db.listPermissionTemplates();
+router.get('/', (req: Request, res: Response) => {
+  const templates = db.listPermissionTemplates(req.user.email);
   res.json({ success: true, data: templates.map(templateToResponse) });
 });
 
@@ -41,7 +42,8 @@ router.post('/', (req: Request, res: Response) => {
     throw new ValidationError(`Template "${parsed.data.name}" already exists`);
   }
 
-  const template = db.insertPermissionTemplate(parsed.data);
+  const template = db.insertPermissionTemplate({ ...parsed.data, ownerEmail: req.user.email });
+  db.insertAuditLog({ action: 'template.create', entityType: 'template', entityId: template.id, actorEmail: req.user.email, details: { name: template.name } });
   res.status(201).json({ success: true, data: templateToResponse(template) });
 });
 
@@ -51,11 +53,13 @@ router.put('/:id', (req: Request, res: Response) => {
   const existing = db.getPermissionTemplateById(id);
   if (!existing) throw new NotFoundError('Template', id);
   if (existing.is_builtin) throw new ValidationError('Cannot modify built-in templates');
+  if (existing.owner_email !== req.user.email) throw new NotFoundError('Template', id);
 
   const parsed = createTemplateSchema.partial().safeParse(req.body);
   if (!parsed.success) throw new ValidationError('Invalid request', parsed.error.flatten());
 
   db.updatePermissionTemplate(id, parsed.data);
+  db.insertAuditLog({ action: 'template.update', entityType: 'template', entityId: id, actorEmail: req.user.email });
   const updated = db.getPermissionTemplateById(id)!;
   res.json({ success: true, data: templateToResponse(updated) });
 });
@@ -66,8 +70,10 @@ router.delete('/:id', (req: Request, res: Response) => {
   const existing = db.getPermissionTemplateById(id);
   if (!existing) throw new NotFoundError('Template', id);
   if (existing.is_builtin) throw new ValidationError('Cannot delete built-in templates');
+  if (existing.owner_email !== req.user.email) throw new NotFoundError('Template', id);
 
   db.deletePermissionTemplate(id);
+  db.insertAuditLog({ action: 'template.delete', entityType: 'template', entityId: id, actorEmail: req.user.email, details: { name: existing.name } });
   res.json({ success: true, data: { message: 'Template deleted' } });
 });
 

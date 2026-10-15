@@ -5,7 +5,8 @@ import { encrypt } from './crypto.js';
 import * as ionosAuth from './ionos-auth.js';
 import * as ionosCloud from './ionos-cloud.js';
 import * as db from '../db/queries.js';
-import { TokenCreationError } from '../middleware/error-handler.js';
+import { TokenCreationError, AppError } from '../middleware/error-handler.js';
+import axios from 'axios';
 import type { CreateTokenRequest, CreateTokenResult, ManagedTokenResponse, SharedResource } from '../types/app.js';
 
 class Rollback {
@@ -158,6 +159,7 @@ export async function createManagedToken(req: CreateTokenRequest, ownerEmail: st
       lastRegeneratedAt: null,
       status: 'active',
       cleanupOnDelete: req.cleanupOnDelete !== false,
+      cleanedUpAt: null,
       tokenValue: tokenJwt,
     };
   } catch (err) {
@@ -185,6 +187,12 @@ export async function createManagedToken(req: CreateTokenRequest, ownerEmail: st
 export async function regenerateToken(id: string, actorEmail: string, adminToken: string): Promise<{ tokenValue: string; expiresAt: string }> {
   const token = db.getManagedTokenById(id);
   if (!token) throw new Error(`Token not found: ${id}`);
+  if (token.status === 'revoked') {
+    throw new AppError('This token was revoked and cannot be regenerated. Create a new one.', 'VALIDATION_ERROR', 400);
+  }
+  if (token.cleaned_up_at) {
+    throw new AppError('This token expired and its IONOS user was cleaned up automatically. Create a new token.', 'VALIDATION_ERROR', 400);
+  }
 
   // Decrypt the sub-user password
   const { decrypt } = await import('./crypto.js');
@@ -229,31 +237,67 @@ export async function regenerateToken(id: string, actorEmail: string, adminToken
   return { tokenValue: tokenJwt, expiresAt };
 }
 
+function isNotFound(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.response?.status === 404;
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : 'unknown';
+}
+
+/**
+ * Delete the sub-user and group on IONOS (a 404 means "already gone" and counts as success).
+ * Returns a list of error messages; empty means everything is gone.
+ */
+export async function cleanupIonosAccess(token: ManagedToken, adminToken: string): Promise<string[]> {
+  const errors: string[] = [];
+  try {
+    await ionosCloud.deleteUser(adminToken, token.ionos_user_id);
+  } catch (err) {
+    if (!isNotFound(err)) errors.push(`Could not delete sub-user: ${errMsg(err)}`);
+  }
+  try {
+    await ionosCloud.deleteGroup(adminToken, token.ionos_group_id);
+  } catch (err) {
+    if (!isNotFound(err)) errors.push(`Could not delete group: ${errMsg(err)}`);
+  }
+  return errors;
+}
+
 export async function revokeManagedToken(id: string, actorEmail: string, adminToken: string): Promise<void> {
   const token = db.getManagedTokenById(id);
   if (!token) throw new Error(`Token not found: ${id}`);
 
   const errors: string[] = [];
+  const alreadyCleanedUp = !!token.cleaned_up_at;
 
-  // NOTE: IONOS Auth API requires web-based auth (not Bearer tokens) for token deletion.
-  // Deleting the sub-user below effectively invalidates their token on IONOS's side.
-
-  // Cleanup sub-user and group if requested
   if (token.cleanup_on_delete) {
+    // Deleting the sub-user also removes its S3 keys and invalidates its token on IONOS.
+    if (!alreadyCleanedUp) errors.push(...await cleanupIonosAccess(token, adminToken));
+  } else if (token.ionos_token_id && token.status !== 'expired') {
+    // Cleanup is off: keep the user, but the token itself must stop working.
     try {
-      await ionosCloud.deleteUser(adminToken, token.ionos_user_id);
+      const { decrypt } = await import('./crypto.js');
+      await ionosAuth.deleteTokenAsUser(token.sub_user_email, decrypt(token.sub_user_password_enc), token.ionos_token_id);
     } catch (err) {
-      errors.push(`Could not delete sub-user: ${err instanceof Error ? err.message : 'unknown'}`);
-    }
-
-    try {
-      await ionosCloud.deleteGroup(adminToken, token.ionos_group_id);
-    } catch (err) {
-      errors.push(`Could not delete group: ${err instanceof Error ? err.message : 'unknown'}`);
+      if (!isNotFound(err)) errors.push(`Could not delete the IONOS token: ${errMsg(err)}`);
     }
   }
 
-  // Update local status
+  if (errors.length > 0) {
+    // Do NOT mark it revoked: access may still be live. Keep the row so the user can retry.
+    db.insertAuditLog({
+      action: 'token.revoke',
+      entityType: 'token',
+      entityId: id,
+      actorEmail,
+      details: { cleanedUp: false, errors },
+      success: false,
+      errorMessage: errors.join('; '),
+    });
+    throw new AppError(`Revoke incomplete, the token may still work. ${errors.join('; ')}`, 'REVOKE_INCOMPLETE', 502, { errors });
+  }
+
   db.updateManagedTokenStatus(id, 'revoked');
 
   db.insertAuditLog({
@@ -261,7 +305,7 @@ export async function revokeManagedToken(id: string, actorEmail: string, adminTo
     entityType: 'token',
     entityId: id,
     actorEmail,
-    details: { cleanedUp: token.cleanup_on_delete === 1, errors: errors.length > 0 ? errors : undefined },
+    details: { cleanedUp: token.cleanup_on_delete === 1 },
   });
 }
 
@@ -283,6 +327,7 @@ export function tokenToResponse(token: ManagedToken): ManagedTokenResponse {
     lastRegeneratedAt: token.last_regenerated_at,
     status: token.status,
     cleanupOnDelete: token.cleanup_on_delete === 1,
+    cleanedUpAt: token.cleaned_up_at,
   };
 }
 

@@ -82,6 +82,12 @@ export async function createUser(adminToken: string, params: {
   return resp.data;
 }
 
+/** Cheap call used to check that an admin token is accepted by IONOS. Throws on 401/403. */
+export async function verifyToken(adminToken: string): Promise<void> {
+  const client = createClient(adminToken);
+  await client.get('/um/users?depth=0');
+}
+
 export async function listUsers(adminToken: string): Promise<IonosUser[]> {
   const client = createClient(adminToken);
   const resp = await client.get<IonosUserListResponse>('/um/users?depth=1');

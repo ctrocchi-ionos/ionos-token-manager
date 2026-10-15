@@ -1,6 +1,9 @@
 import { getDb } from './connection.js';
 
-const CURRENT_VERSION = 5;
+const CURRENT_VERSION = 6;
+
+// Optional: owner to assign to rows that predate per-user ownership (old installs only).
+const LEGACY_OWNER = (process.env.LEGACY_OWNER_EMAIL || '').trim().toLowerCase().replace(/'/g, "''");
 
 const MIGRATIONS: Record<number, string[]> = {
   1: [
@@ -67,7 +70,7 @@ const MIGRATIONS: Record<number, string[]> = {
   ],
   2: [
     `ALTER TABLE managed_tokens ADD COLUMN owner_email TEXT`,
-    `UPDATE managed_tokens SET owner_email = 'you@example.com' WHERE owner_email IS NULL`,
+    ...(LEGACY_OWNER ? [`UPDATE managed_tokens SET owner_email = '${LEGACY_OWNER}' WHERE owner_email IS NULL`] : []),
     `CREATE INDEX IF NOT EXISTS idx_tokens_owner ON managed_tokens(owner_email)`,
   ],
   3: [
@@ -83,12 +86,19 @@ const MIGRATIONS: Record<number, string[]> = {
       expires_at TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
-    `INSERT OR IGNORE INTO user_admin_tokens (owner_email, current_token_enc, token_id, issued_at, expires_at)
-      SELECT 'you@example.com', current_token_enc, token_id, issued_at, expires_at
-      FROM admin_token_state WHERE id = 1`,
+    ...(LEGACY_OWNER ? [`INSERT OR IGNORE INTO user_admin_tokens (owner_email, current_token_enc, token_id, issued_at, expires_at)
+      SELECT '${LEGACY_OWNER}', current_token_enc, token_id, issued_at, expires_at
+      FROM admin_token_state WHERE id = 1`] : []),
   ],
   5: [
     `ALTER TABLE managed_tokens ADD COLUMN last_regenerated_at TEXT`,
+  ],
+  6: [
+    // Set when an expired token's IONOS user/group were removed by the automatic sweep
+    `ALTER TABLE managed_tokens ADD COLUMN cleaned_up_at TEXT`,
+    // Custom templates belong to the user who created them (NULL = built-in)
+    `ALTER TABLE permission_templates ADD COLUMN owner_email TEXT`,
+    `UPDATE permission_templates SET owner_email = (SELECT owner_email FROM managed_tokens WHERE owner_email IS NOT NULL ORDER BY created_at LIMIT 1) WHERE is_builtin = 0 AND owner_email IS NULL`,
   ],
 };
 

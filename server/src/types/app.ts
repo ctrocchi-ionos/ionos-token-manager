@@ -52,6 +52,7 @@ export interface ManagedToken {
   created_at: string;
   expires_at: string;
   last_regenerated_at: string | null;
+  cleaned_up_at: string | null;
   status: 'active' | 'expired' | 'revoked' | 'error';
   cleanup_on_delete: number;
   owner_email: string;
@@ -75,6 +76,7 @@ export interface ManagedTokenResponse {
   lastRegeneratedAt: string | null;
   status: string;
   cleanupOnDelete: boolean;
+  cleanedUpAt: string | null;
 }
 
 // Token creation request
@@ -101,6 +103,7 @@ export interface PermissionTemplate {
   permissions: string; // JSON string
   shared_resource_types: string; // JSON string
   is_builtin: number;
+  owner_email: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -112,6 +115,7 @@ export interface PermissionTemplateResponse {
   permissions: PermissionFlags;
   sharedResourceTypes: string[];
   isBuiltin: boolean;
+  ownerEmail: string | null;
   createdAt: string;
   updatedAt: string;
 }
