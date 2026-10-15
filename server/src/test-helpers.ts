@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { encryptWith } from './services/crypto.js';
 import * as q from './workspace/queries.js';
@@ -49,4 +50,42 @@ export function addTestAccount(ws: Workspace, contractNumber: number, opts: { ex
     token_id: opts.noToken ? null : 'admin-kid', issued_at: new Date().toISOString(), expires_at: opts.noToken ? null : expires,
   });
   return id;
+}
+
+/** The admin token stored for alice@ionos.com in buildLegacyDb (contract 10000001). */
+export const LEGACY_ALICE_ADMIN = fakeJwt({ contractNumber: 10000001, kid: 'alice-admin-kid' });
+
+/**
+ * Build a pre-workspace database (schema v6, as on fix/security-audit) at `path`, secrets encrypted with `key`.
+ * Owners: alice (tokens a1 on her admin contract, a2 on contract 777, x1 with no contract) and bob (b1).
+ */
+export function buildLegacyDb(path: string, key: Buffer, opts: { ownerless?: boolean } = {}): void {
+  const db = new Database(path);
+  db.exec(`
+    CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT);
+    INSERT INTO schema_version (version) VALUES (6);
+    CREATE TABLE user_admin_tokens (owner_email TEXT PRIMARY KEY, current_token_enc TEXT NOT NULL, token_id TEXT, issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, updated_at TEXT);
+    CREATE TABLE managed_tokens (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, ionos_token_id TEXT, ionos_user_id TEXT NOT NULL,
+      ionos_group_id TEXT NOT NULL, sub_user_email TEXT NOT NULL, sub_user_password_enc TEXT NOT NULL, permissions TEXT NOT NULL,
+      shared_resources TEXT DEFAULT '[]', template_id TEXT, ttl_seconds INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', cleanup_on_delete INTEGER NOT NULL DEFAULT 1, owner_email TEXT,
+      last_regenerated_at TEXT, cleaned_up_at TEXT);
+    CREATE TABLE permission_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT, permissions TEXT NOT NULL,
+      shared_resource_types TEXT DEFAULT '[]', is_builtin INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')), owner_email TEXT);
+    CREATE TABLE audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, details TEXT,
+      ionos_request_ids TEXT, success INTEGER NOT NULL DEFAULT 1, error_message TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), actor_email TEXT);
+  `);
+  const exp = new Date(Date.now() + 86400_000).toISOString();
+  db.prepare('INSERT INTO user_admin_tokens VALUES (?, ?, ?, ?, ?, ?)').run('alice@ionos.com', encryptWith(key, LEGACY_ALICE_ADMIN), 'alice-admin-kid', exp, exp, exp);
+  const tok = db.prepare(`INSERT INTO managed_tokens (id, name, ionos_token_id, ionos_user_id, ionos_group_id, sub_user_email, sub_user_password_enc,
+    permissions, ttl_seconds, expires_at, owner_email) VALUES (?, ?, 't', 'u', 'g', ?, ?, '{}', 60, ?, ?)`);
+  tok.run('a1', 'alice-1', 'tkn-a1@c10000001.tokenmanager.internal', encryptWith(key, 'pw-a1'), exp, 'alice@ionos.com');
+  tok.run('a2', 'alice-other-contract', 'tkn-a2@c777.tokenmanager.internal', encryptWith(key, 'pw-a2'), exp, 'alice@ionos.com');
+  tok.run('b1', 'bob-1', 'tkn-b1@c888.tokenmanager.internal', encryptWith(key, 'pw-b1'), exp, 'bob@ionos.com');
+  tok.run('x1', 'weird', 'not-a-tool-user@example.com', encryptWith(key, 'pw-x'), exp, 'alice@ionos.com');
+  if (opts.ownerless) tok.run('o1', 'from-single-user-era', 'tkn-o1@c10000001.tokenmanager.internal', encryptWith(key, 'pw-o1'), exp, null);
+  db.prepare("INSERT INTO permission_templates (id, name, permissions, is_builtin, owner_email) VALUES ('tp1', 'Alice custom', '{}', 0, 'alice@ionos.com')").run();
+  db.prepare("INSERT INTO audit_log (action, actor_email) VALUES ('token.create', 'alice@ionos.com'), ('token.create', 'bob@ionos.com')").run();
+  db.close();
 }

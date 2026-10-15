@@ -72,6 +72,17 @@ export function insertManagedToken(db: DB, t: NewTokenRow): void {
       t.ttl_seconds, t.expires_at, t.status, t.cleanup_on_delete);
 }
 
+/** Insert a complete token row, keeping its original timestamps (migration and restore). */
+export function insertTokenRow(db: DB, t: TokenRow, opts: { orIgnore?: boolean } = {}): void {
+  db.prepare(`INSERT ${opts.orIgnore ? 'OR IGNORE ' : ''}INTO managed_tokens (id, account_id, name, description, ionos_token_id,
+      ionos_user_id, ionos_group_id, sub_user_email, sub_user_password_enc, permissions, shared_resources, template_id,
+      ttl_seconds, created_at, expires_at, last_regenerated_at, cleaned_up_at, status, cleanup_on_delete)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(t.id, t.account_id, t.name, t.description, t.ionos_token_id, t.ionos_user_id, t.ionos_group_id,
+      t.sub_user_email, t.sub_user_password_enc, t.permissions, t.shared_resources, t.template_id,
+      t.ttl_seconds, t.created_at, t.expires_at, t.last_regenerated_at, t.cleaned_up_at, t.status, t.cleanup_on_delete);
+}
+
 export function getManagedTokenById(db: DB, id: string): TokenRow | undefined {
   return db.prepare('SELECT * FROM managed_tokens WHERE id = ?').get(id) as TokenRow | undefined;
 }
@@ -158,6 +169,13 @@ export function insertPermissionTemplate(db: DB, t: {
     VALUES (?, ?, ?, ?, ?, 0)`)
     .run(id, t.name, t.description ?? null, JSON.stringify(t.permissions), JSON.stringify(t.sharedResourceTypes ?? []));
   return getPermissionTemplateById(db, id)!;
+}
+
+/** Insert a complete custom-template row, keeping its original timestamps (migration and restore). */
+export function insertTemplateRow(db: DB, t: Omit<TemplateRow, 'is_builtin'>, opts: { orIgnore?: boolean } = {}): void {
+  db.prepare(`INSERT ${opts.orIgnore ? 'OR IGNORE ' : ''}INTO permission_templates
+      (id, name, description, permissions, shared_resource_types, is_builtin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)`)
+    .run(t.id, t.name, t.description, t.permissions, t.shared_resource_types, t.created_at, t.updated_at);
 }
 
 export function getPermissionTemplateById(db: DB, id: string): TemplateRow | undefined {

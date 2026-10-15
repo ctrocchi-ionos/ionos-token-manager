@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { assertSafeAuthConfig } from './middleware/sso-auth.js';
 import { startExpiredSweep } from './services/expired-sweep.js';
 import { closeAllWorkspaces } from './workspace/registry.js';
+import { migrateLegacyDatabase } from './workspace/migrate-legacy.js';
 import { createApp, publicDir } from './app.js';
 
 async function main() {
@@ -13,6 +14,7 @@ async function main() {
 
   assertSafeAuthConfig();
   config.hardenDataDir();
+  migrateLegacyDatabase(); // throws (and the app does not start) if the master key is wrong
   startExpiredSweep();
 
   if (!config.proxySecret) {
