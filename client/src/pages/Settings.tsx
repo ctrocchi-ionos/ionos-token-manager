@@ -1,12 +1,13 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, CheckCircle2, Download, Info, Key, Loader2, Pencil, Plus, Save, Server, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Info, Key, Loader2, Pencil, Plus, Save, Server, Trash2 } from 'lucide-react';
 import {
-  addDcdAccount, apiFetch, removeDcdAccount, renameDcdAccount, replaceDcdAccountToken, restoreMyBackup, type DcdAccount,
+  addDcdAccount, apiFetch, removeDcdAccount, renameDcdAccount, replaceDcdAccountToken, type DcdAccount,
 } from '@/api/client';
 import { useAccounts } from '@/lib/account-context';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import RestoreBackup from '@/components/RestoreBackup';
 import { cn, formatDate } from '@/lib/utils';
 
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder:text-gray-300';
@@ -148,34 +149,6 @@ async function downloadFile(path: string, fallbackName: string) {
 }
 
 function BackupCard() {
-  const queryClient = useQueryClient();
-  const dbRef = useRef<HTMLInputElement>(null);
-  const keyRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-
-  async function restore() {
-    const dbFile = dbRef.current?.files?.[0];
-    const keyFile = keyRef.current?.files?.[0];
-    if (!dbFile || !keyFile) { toast.error('Select both your database file and your key file'); return; }
-    setBusy(true);
-    try {
-      const bytes = new Uint8Array(await dbFile.arrayBuffer());
-      let binary = '';
-      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      const r = await restoreMyBackup(btoa(binary), (await keyFile.text()).trim());
-      await queryClient.resetQueries();
-      toast.success(`Restored ${r.data?.accounts ?? 0} DCD account(s) and ${r.data?.tokens ?? 0} token(s)`);
-      if (dbRef.current) dbRef.current.value = '';
-      if (keyRef.current) keyRef.current.value = '';
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Restore failed');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const fileCls = 'block text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-gray-300 file:text-sm file:bg-white hover:file:bg-gray-50 cursor-pointer';
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
       <h2 className="font-semibold text-gray-900">Backup &amp; restore</h2>
@@ -190,29 +163,7 @@ function BackupCard() {
         </div>
       </div>
       <div className="border-t border-gray-100" />
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-gray-700">Restore</p>
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-gray-600">My database (.db)</label>
-          <input ref={dbRef} type="file" accept=".db" className={fileCls} />
-        </div>
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-gray-600">My key (.key)</label>
-          <input ref={keyRef} type="file" accept=".key,text/plain" className={fileCls} />
-        </div>
-        <button className={cn(primary, 'bg-red-600 hover:bg-red-700')} disabled={busy} onClick={() => setConfirm(true)}>
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}Restore
-        </button>
-      </div>
-      <ConfirmDialog
-        open={confirm}
-        title="Replace your data with this backup?"
-        message="Your current DCD accounts, tokens, custom templates and history in this app are replaced by the backup. Other users are not affected. Tokens created after the backup keep working in IONOS but will no longer be listed here."
-        confirmLabel="Restore"
-        confirmVariant="danger"
-        onConfirm={() => { setConfirm(false); restore(); }}
-        onCancel={() => setConfirm(false)}
-      />
+      <RestoreBackup />
     </div>
   );
 }

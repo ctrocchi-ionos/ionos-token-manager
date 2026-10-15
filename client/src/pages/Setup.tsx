@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDcdAccount } from '@/api/client';
 import { Shield, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
+import RestoreBackup from '@/components/RestoreBackup';
 
 export default function Setup() {
   const queryClient = useQueryClient();
@@ -107,6 +108,14 @@ export default function Setup() {
           The token is encrypted with a key unique to your workspace before it is stored. Nobody
           else using this app can see it.
         </p>
+
+        <div className="border-t border-gray-100 mt-6 pt-6 space-y-2">
+          <p className="text-sm text-gray-600 leading-relaxed">
+            Already used this app elsewhere? Restore your backup (my database + my key, from Settings
+            on the other copy) instead of adding an account.
+          </p>
+          <RestoreBackup title="Restore from a backup" />
+        </div>
       </div>
     </div>
   );
