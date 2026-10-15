@@ -61,6 +61,7 @@ export interface ManagedToken {
 // API response format for managed token
 export interface ManagedTokenResponse {
   id: string;
+  accountId: string;
   name: string;
   description: string | null;
   ionosTokenId: string | null;
