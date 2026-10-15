@@ -72,3 +72,14 @@ test('a fingerprint alone counts as existing data', () => {
   mk.recordMasterKey(K1, p.dataDir);
   assert.throws(() => mk.resolveMasterKey({ envKey: '', ...p }), /already has data/);
 });
+
+test('a legacy tokenmanager.db without any key: refuses, writes no key, leaves the db untouched', () => {
+  const p = place();
+  const db = join(p.dataDir, 'tokenmanager.db');
+  writeFileSync(db, 'legacy-db-bytes');
+  writeFileSync(p.dotEnvPath, 'DEV_AUTH_EMAIL=me@ionos.com\n');
+  assert.throws(() => mk.resolveMasterKey({ envKey: '', ...p }), /already has data/);
+  assert.ok(!existsSync(join(p.dataDir, 'encryption.key')));
+  assert.equal(readFileSync(p.dotEnvPath, 'utf-8'), 'DEV_AUTH_EMAIL=me@ionos.com\n');
+  assert.equal(readFileSync(db, 'utf-8'), 'legacy-db-bytes');
+});

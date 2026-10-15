@@ -36,6 +36,10 @@ async function main() {
   if (process.env.DEV_AUTH_EMAIL && process.env.ALLOW_DEV_AUTH !== '1') {
     console.warn('[Security] DEV_AUTH_EMAIL is set but ignored (only used by `npm run dev`).');
   }
+  if (process.env.ALLOW_DEV_AUTH === '1' && !['127.0.0.1', 'localhost'].includes(config.host)) {
+    console.warn(`[Security] Dev login is on and the app listens on ${config.host}: anyone on your network who reaches port ${config.port} `
+      + 'is treated as DEV_AUTH_EMAIL. Add HOST=127.0.0.1 to .env to keep it on this machine.');
+  }
 
   const server = createApp().listen(config.port, config.host, () => {
     const displayHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
