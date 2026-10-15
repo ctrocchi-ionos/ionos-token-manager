@@ -21,8 +21,8 @@ class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'token-manager', ...options?.headers },
   });
 
   // Handle non-JSON responses (like CSV exports)

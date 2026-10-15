@@ -85,7 +85,7 @@ export default function Settings() {
 
       const res = await fetch('/api/admin/restore', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'token-manager' },
         body: JSON.stringify({ db: dbBase64, key: key?.trim() }),
       });
       const json = await res.json();
