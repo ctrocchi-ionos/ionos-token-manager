@@ -1,12 +1,16 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, readdirSync, statSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { IonosJwtPayload, IonosJwtHeader } from './types/ionos.js';
 
+// Everything this process creates (workspace folders, db files, key file) is owner-only.
+process.umask(0o077);
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function loadEnv(): Record<string, string> {
+  if (process.env.NO_DOTENV === '1') return {};
   const envPath = resolve(__dirname, '..', '..', '.env');
   const env: Record<string, string> = {};
   if (existsSync(envPath)) {
@@ -96,13 +100,14 @@ class Config {
     }
   }
 
-  /** Restrict the data directory and everything in it to the current user. */
+  /** Restrict the data directory and its direct children to the current user (folders 0700, files 0600). */
   hardenDataDir(): void {
     try {
       chmodSync(this.dataDir, 0o700);
       for (const f of readdirSync(this.dataDir)) {
         if (f === '.gitkeep') continue;
-        try { chmodSync(join(this.dataDir, f), 0o600); } catch { /* ignore */ }
+        const p = join(this.dataDir, f);
+        try { chmodSync(p, statSync(p).isDirectory() ? 0o700 : 0o600); } catch { /* ignore */ }
       }
     } catch (err) {
       console.warn('[Config] Could not restrict data directory permissions:', err instanceof Error ? err.message : err);

@@ -3,6 +3,7 @@ import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+process.env.NO_DOTENV = '1';
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'tokenmgr-test-'));
 process.env.ENCRYPTION_KEY = 'a'.repeat(64);
 delete process.env.DEV_AUTH_EMAIL;
