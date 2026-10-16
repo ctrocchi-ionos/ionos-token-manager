@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { listAuditLog, apiFetch } from '@/api/client';
+import { toast } from 'sonner';
+import { listAuditLog, downloadFromApi } from '@/api/client';
 import { useAccounts } from '@/lib/account-context';
-import { cn, formatDate } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import { Download, ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 const ACTION_LABELS: Record<string, string> = {
@@ -41,16 +42,8 @@ export default function AuditLog() {
   const total = resp?.pagination?.total ?? 0;
   const totalPages = Math.ceil(total / 30);
 
-  const handleExport = async (format: 'json' | 'csv') => {
-    const res = await apiFetch(`/audit/export?format=${format}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `audit-log.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const handleExport = (format: 'json' | 'csv') =>
+    downloadFromApi(`/audit/export?format=${format}`, `audit-log.${format}`).catch((err: Error) => toast.error(`Export failed: ${err.message}`));
 
   return (
     <div className="space-y-6">

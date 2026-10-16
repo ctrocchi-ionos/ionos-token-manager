@@ -26,7 +26,8 @@ export function createApp(): express.Express {
   app.use(securityHeaders);
   app.use(requestLogger);
 
-  // Platform health check: unauthenticated, no details. Path must not change.
+  // Platform health check: unauthenticated, no details. Path and body must not change (the platform expects
+  // dbConnected; workspaces open per user, so it only says the process is up and serving).
   app.get('/api/admin/health', (_req: Request, res: Response) => {
     res.json({ success: true, data: { status: 'ok', dbConnected: true } });
   });

@@ -7,6 +7,7 @@ import { decodeJwtPayload } from '../config.js';
 import { AppError } from '../middleware/error-handler.js';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { requireAccount } from '../middleware/workspace.js';
+import { isoUtc } from '../lib/time.js';
 
 const router = Router();
 router.use(requireAccount);
@@ -46,7 +47,7 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
             adminTokenStatus: {
               expiresAt: account.expires_at,
               daysRemaining: accountInfo.daysRemaining,
-              lastUpdatedAt: account.updated_at,
+              lastUpdatedAt: isoUtc(account.updated_at),
             },
           }
         : managed

@@ -85,9 +85,34 @@ test('add DCD account over HTTP, then list it', async () => {
   assert.equal(JSON.stringify(list).includes('token_enc'), false);
 });
 
-test('resources route rejects odd types', async () => {
-  const r = await call('/resources/..%2Fusers', 'alice@ionos.com', { account: aliceAcc });
+test('only the datacenters resource route exists', async () => {
+  for (const path of ['/resources/all', '/resources/..%2Fusers', '/resources/servers']) {
+    const r = await call(path, 'alice@ionos.com', { account: aliceAcc });
+    assert.equal(r.status, 404, path);
+    assert.equal((await r.json()).error.code, 'NOT_FOUND', path);
+  }
+});
+
+test('renaming a template to a name already in use is a 400, not a server error', async () => {
+  const mk = async (name: string) => (await (await call('/templates', 'alice@ionos.com', {
+    method: 'POST', body: JSON.stringify({ name, permissions: { s3Privilege: true } }),
+  })).json()).data;
+  const a = await mk('rename-a');
+  await mk('rename-b');
+  const r = await call(`/templates/${a.id}`, 'alice@ionos.com', { method: 'PUT', body: JSON.stringify({ name: 'rename-b' }) });
   assert.equal(r.status, 400);
+  assert.match((await r.json()).error.message, /already exists/);
+  const same = await call(`/templates/${a.id}`, 'alice@ionos.com', { method: 'PUT', body: JSON.stringify({ name: 'rename-a', description: 'x' }) });
+  assert.equal(same.status, 200); // keeping its own name is fine
+});
+
+test('timestamps reach the browser as UTC with a zone', async () => {
+  const token = (await (await call('/tokens/alice-token', 'alice@ionos.com')).json()).data;
+  assert.match(token.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+  const audit = (await (await call('/audit', 'alice@ionos.com')).json()).data;
+  assert.ok(audit.length > 0 && audit.every((e: { createdAt: string }) => e.createdAt.endsWith('Z')));
+  const accounts = (await (await call('/dcd-accounts', 'alice@ionos.com')).json()).data;
+  assert.ok(accounts[0].updatedAt.endsWith('Z'));
 });
 
 test("a colleague's token sub-user (same contract, other workspace) cannot be deleted as 'external'", async () => {

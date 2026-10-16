@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import * as q from '../workspace/queries.js';
 import { csvRow } from '../lib/csv.js';
 import { parsePaging } from '../lib/paging.js';
+import { isoUtc } from '../lib/time.js';
 import type { AuditRow } from '../workspace/types.js';
 import type { AuditLogResponse } from '../types/app.js';
 
@@ -17,7 +18,7 @@ function entryToResponse(e: AuditRow): AuditLogResponse {
     details: e.details ? JSON.parse(e.details) : null,
     success: e.success === 1,
     errorMessage: e.error_message,
-    createdAt: e.created_at,
+    createdAt: isoUtc(e.created_at),
   };
 }
 

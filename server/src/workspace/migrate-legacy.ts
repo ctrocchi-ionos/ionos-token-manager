@@ -214,7 +214,7 @@ function freeBackupName(path: string): string {
 
 /** Split the old shared tokenmanager.db into per-user workspaces. Keeps the old file, renamed. */
 export function migrateLegacyDatabase(): LegacyMigrationResult {
-  const path = config.dbPath;
+  const path = config.legacyDbPath;
   const result: LegacyMigrationResult = { migrated: false, owners: 0, tokens: 0, skippedTokens: 0 };
   if (!existsSync(path)) return result;
 

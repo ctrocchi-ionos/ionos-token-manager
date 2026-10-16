@@ -50,7 +50,8 @@ class Config {
   private encryptionKey: string = '';
   readonly port: number;
   readonly host: string;
-  readonly dbPath: string;
+  /** The pre-workspace shared database (1.x). Only read once, by the startup migration. */
+  readonly legacyDbPath: string;
   readonly dataDir: string;
   readonly projectRoot: string;
   readonly proxySecret: string;
@@ -73,7 +74,7 @@ class Config {
     this.proxySecret = processEnv.PROXY_SECRET || '';
 
     this.dataDir = processEnv.DATA_DIR || resolve(__dirname, '..', 'data');
-    this.dbPath = join(this.dataDir, 'tokenmanager.db');
+    this.legacyDbPath = join(this.dataDir, 'tokenmanager.db');
 
     mkdirSync(this.dataDir, { recursive: true });
 

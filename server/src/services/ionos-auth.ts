@@ -28,44 +28,11 @@ export async function listTokens(adminToken: string): Promise<IonosToken[]> {
   return resp.data.tokens ?? [];
 }
 
-export async function getToken(adminToken: string, tokenId: string): Promise<IonosToken> {
-  const client = createClient();
-  const resp = await client.get<IonosToken>(`/tokens/${tokenId}`, {
-    headers: authHeaders(adminToken),
-  });
-  return resp.data;
-}
-
-export async function deleteToken(adminToken: string, tokenId: string): Promise<void> {
-  const client = createClient();
-  await client.delete(`/tokens/${tokenId}`, {
-    headers: authHeaders(adminToken),
-  });
-}
-
 export async function deleteTokenAsUser(email: string, password: string, tokenId: string): Promise<void> {
   const client = createClient();
   await client.delete(`/tokens/${tokenId}`, {
     headers: basicAuthHeaders(email, password),
   });
-}
-
-export async function deleteTokensByCriteria(adminToken: string, criteria: 'EXPIRED' | 'ALL' | 'CURRENT'): Promise<void> {
-  const client = createClient();
-  await client.delete(`/tokens?criteria=${criteria}`, {
-    headers: authHeaders(adminToken),
-  });
-}
-
-export async function generateToken(adminToken: string, ttlSeconds: number): Promise<string> {
-  const client = createClient();
-  const resp = await client.get('/tokens/generate', {
-    params: { ttl: ttlSeconds },
-    headers: authHeaders(adminToken),
-  });
-  if (typeof resp.data === 'string') return resp.data;
-  if (resp.data.token) return resp.data.token;
-  throw new Error('Unexpected token generate response format');
 }
 
 export async function generateTokenAsUser(

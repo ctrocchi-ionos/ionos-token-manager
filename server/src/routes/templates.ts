@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import * as q from '../workspace/queries.js';
 import { ValidationError, NotFoundError } from '../middleware/error-handler.js';
+import { isoUtc } from '../lib/time.js';
 import type { TemplateRow } from '../workspace/types.js';
 import type { PermissionTemplateResponse } from '../types/app.js';
 
@@ -15,8 +16,8 @@ function templateToResponse(t: TemplateRow): PermissionTemplateResponse {
     permissions: JSON.parse(t.permissions),
     sharedResourceTypes: JSON.parse(t.shared_resource_types),
     isBuiltin: t.is_builtin === 1,
-    createdAt: t.created_at,
-    updatedAt: t.updated_at,
+    createdAt: isoUtc(t.created_at),
+    updatedAt: isoUtc(t.updated_at),
   };
 }
 
@@ -51,9 +52,13 @@ router.post('/', (req: Request, res: Response) => {
 
 router.put('/:id', (req: Request, res: Response) => {
   const id = req.params.id as string;
-  mustGetCustom(req, id);
+  const current = mustGetCustom(req, id);
   const parsed = createTemplateSchema.partial().safeParse(req.body);
   if (!parsed.success) throw new ValidationError('Invalid request', parsed.error.flatten());
+  const { name } = parsed.data;
+  if (name !== undefined && name !== current.name && q.templateExistsByName(req.ws.db, name)) {
+    throw new ValidationError(`Template "${name}" already exists`);
+  }
   q.updatePermissionTemplate(req.ws.db, id, parsed.data);
   q.insertAuditLog(req.ws.db, { action: 'template.update', entityType: 'template', entityId: id });
   res.json({ success: true, data: templateToResponse(q.getPermissionTemplateById(req.ws.db, id)!) });

@@ -6,7 +6,6 @@ import { join } from 'path';
 import { buildLegacyDb, LEGACY_ALICE_ADMIN } from '../test-helpers.js';
 
 const { config } = await import('../config.js');
-const { encryptWith } = await import('../services/crypto.js');
 const { migrateLegacyDatabase } = await import('./migrate-legacy.js');
 const { openWorkspace, closeAllWorkspaces } = await import('./registry.js');
 const q = await import('./queries.js');

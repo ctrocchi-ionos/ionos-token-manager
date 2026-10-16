@@ -1,8 +1,11 @@
 {
   "name": "ionos-token-manager",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "IONOS Cloud Token Manager \u2014 create scoped, labeled API tokens with real permission isolation",
+  "description": "IONOS Cloud Token Manager — create scoped, labeled API tokens with real permission isolation",
+  "engines": {
+    "node": ">=18.18"
+  },
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w client",

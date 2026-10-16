@@ -5,6 +5,7 @@ import { AppError, NotFoundError, ValidationError } from '../middleware/error-ha
 import * as ionosCloud from './ionos-cloud.js';
 import { decryptWith, encryptWith } from './crypto.js';
 import * as q from '../workspace/queries.js';
+import { isoUtc } from '../lib/time.js';
 import type { Workspace } from '../workspace/registry.js';
 import type { AccountRow } from '../workspace/types.js';
 
@@ -183,7 +184,7 @@ export function toAccountResponse(ws: Workspace, a: AccountRow): DcdAccountRespo
     expiresAt: a.expires_at,
     daysRemaining: Math.max(0, Math.floor(msLeft / 86400000)),
     tokensHoldingAccess: q.countTokensHoldingIonosAccess(ws.db, a.id),
-    updatedAt: a.updated_at,
+    updatedAt: isoUtc(a.updated_at),
     expired: !!a.expires_at && msLeft <= 0,
   };
 }

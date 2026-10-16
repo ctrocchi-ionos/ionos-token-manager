@@ -278,8 +278,9 @@ export function listAuditLog(db: DB, f: AuditFilters): { items: AuditRow[]; tota
   if (f.accountId) { conditions.push('account_id = ?'); params.push(f.accountId); }
   if (f.action) { conditions.push('action = ?'); params.push(f.action); }
   if (f.entityType) { conditions.push('entity_type = ?'); params.push(f.entityType); }
-  if (f.from) { conditions.push('created_at >= ?'); params.push(f.from); }
-  if (f.to) { conditions.push('created_at <= ?'); params.push(f.to); }
+  // datetime() on both sides: stored values are 'YYYY-MM-DD HH:MM:SS' (UTC), filters may be ISO 8601
+  if (f.from) { conditions.push('datetime(created_at) >= datetime(?)'); params.push(f.from); }
+  if (f.to) { conditions.push('datetime(created_at) <= datetime(?)'); params.push(f.to); }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM audit_log ${where}`).get(...params) as { c: number }).c;
   const page = f.page ?? 1;

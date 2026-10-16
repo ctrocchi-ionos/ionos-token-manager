@@ -13,13 +13,6 @@ export class AppError extends Error {
   }
 }
 
-export class IonosApiError extends AppError {
-  constructor(message: string, public ionosStatusCode: number, public ionosRequestId?: string) {
-    super(message, 'IONOS_API_ERROR', 502);
-    this.name = 'IonosApiError';
-  }
-}
-
 export class TokenCreationError extends AppError {
   constructor(message: string, public step: string, public rollbackResult?: unknown) {
     super(message, 'TOKEN_CREATION_FAILED', 500, { step, rollbackResult });

@@ -96,11 +96,3 @@ export interface AuditLogResponse {
   errorMessage: string | null;
   createdAt: string;
 }
-
-// API standard response
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: { code: string; message: string; details?: unknown };
-  pagination?: { total: number; page: number; limit: number };
-}

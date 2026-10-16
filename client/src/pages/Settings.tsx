@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, CheckCircle2, Download, Info, Key, Loader2, Pencil, Plus, Save, Server, Trash2 } from 'lucide-react';
 import {
-  addDcdAccount, apiFetch, removeDcdAccount, renameDcdAccount, replaceDcdAccountToken, type DcdAccount,
+  addDcdAccount, downloadFromApi, removeDcdAccount, renameDcdAccount, replaceDcdAccountToken, type DcdAccount,
 } from '@/api/client';
 import { useAccounts } from '@/lib/account-context';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -41,8 +41,10 @@ function AccountCard({ account }: { account: DcdAccount }) {
       if (next) {
         await queryClient.invalidateQueries({ queryKey: ['dcd-accounts'] });
         select(next.id);
+      } else if (account.id === current?.id) {
+        queryClient.resetQueries(); // the last account is gone: back to the first-run screen
       } else {
-        queryClient.resetQueries();
+        queryClient.invalidateQueries({ queryKey: ['dcd-accounts'] }); // another account: only the list changes
       }
     },
     onError: (e) => toast.error(e.message),
@@ -138,15 +140,8 @@ function AddAccount() {
   );
 }
 
-async function downloadFile(path: string, fallbackName: string) {
-  const res = await apiFetch(path);
-  if (!res.ok) { toast.error('Download failed'); return; }
-  const blob = await res.blob();
-  const name = res.headers.get('content-disposition')?.match(/filename="?([^"]+)"?/)?.[1] ?? fallbackName;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
-  URL.revokeObjectURL(url);
-}
+const downloadFile = (path: string, fallbackName: string) =>
+  downloadFromApi(path, fallbackName).catch((err: Error) => toast.error(`Download failed: ${err.message}`));
 
 function BackupCard() {
   return (

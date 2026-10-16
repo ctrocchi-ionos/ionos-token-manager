@@ -10,10 +10,6 @@ export interface IonosTokenListResponse {
   tokens: IonosToken[];
 }
 
-export interface IonosTokenGenerateResponse {
-  token: string;
-}
-
 // IONOS Cloud API types
 export interface IonosUserProperties {
   firstname: string;
@@ -78,12 +74,6 @@ export interface IonosGroup {
   properties: IonosGroupProperties;
 }
 
-export interface IonosGroupListResponse {
-  id: string;
-  type: string;
-  items: IonosGroup[];
-}
-
 export interface IonosMetadata {
   etag?: string;
   createdDate?: string;
@@ -93,24 +83,6 @@ export interface IonosMetadata {
   lastModifiedBy?: string;
   lastModifiedByUserId?: string;
   state?: string;
-}
-
-export interface IonosShareProperties {
-  editPrivilege: boolean;
-  sharePrivilege: boolean;
-}
-
-export interface IonosShare {
-  id: string;
-  type: string;
-  href: string;
-  properties: IonosShareProperties;
-}
-
-export interface IonosShareListResponse {
-  id: string;
-  type: string;
-  items: IonosShare[];
 }
 
 export interface IonosDatacenterProperties {
@@ -133,29 +105,6 @@ export interface IonosDatacenterListResponse {
   id: string;
   type: string;
   items: IonosDatacenter[];
-}
-
-export interface IonosResource {
-  id: string;
-  type: string;
-  href: string;
-  metadata?: IonosMetadata;
-  properties?: {
-    name?: string;
-    secAuthProtection?: boolean;
-  };
-}
-
-export interface IonosResourceListResponse {
-  id: string;
-  type: string;
-  items: IonosResource[];
-}
-
-export interface IonosResourceByTypeResponse {
-  id: string;
-  type: string;
-  items: IonosResource[];
 }
 
 // JWT payload from IONOS token

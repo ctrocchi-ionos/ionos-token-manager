@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { listTokens, getTokenStats, apiFetch, bulkDeleteTokens, revokeToken, dismissToken } from '@/api/client';
+import { listTokens, getTokenStats, downloadFromApi, deleteExpiredTokens, revokeToken, dismissToken, type ManagedToken } from '@/api/client';
 import ExpiryBadge from '@/components/ExpiryBadge';
+import { useAccounts } from '@/lib/account-context';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { getEnabledPermissionLabels, countEnabledPermissions } from '@/lib/permissions';
 import { cn, statusColor, formatDate } from '@/lib/utils';
@@ -29,11 +30,18 @@ const STATUS_FILTERS = [
   { key: 'revoked', label: 'Revoked' },
 ];
 
+const PAGE_SIZE = 50;
+
+/** Its IONOS sub-user still exists: active, or expired but not cleaned up yet (then revoke removes it). */
+const holdsIonosUser = (t: ManagedToken) => t.status === 'active' || (t.status === 'expired' && t.cleanupOnDelete && !t.cleanedUpAt);
+
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const { current } = useAccounts();
+  useEffect(() => setPage(1), [current?.id]); // another DCD account: start at its first page
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
@@ -44,8 +52,8 @@ export default function Dashboard() {
   });
 
   const { data: tokensResp, isLoading } = useQuery({
-    queryKey: ['tokens', statusFilter, search],
-    queryFn: () => listTokens({ status: statusFilter, search: search || undefined }),
+    queryKey: ['tokens', statusFilter, search, page],
+    queryFn: () => listTokens({ status: statusFilter, search: search || undefined, page, limit: PAGE_SIZE }),
     refetchInterval: 30000,
   });
 
@@ -71,11 +79,13 @@ export default function Dashboard() {
   });
 
   const bulkDeleteMut = useMutation({
-    mutationFn: () => bulkDeleteTokens('expired'),
+    mutationFn: deleteExpiredTokens,
     onSuccess: (resp) => {
       queryClient.invalidateQueries({ queryKey: ['tokens'] });
       queryClient.invalidateQueries({ queryKey: ['tokenStats'] });
-      toast.success(`Deleted ${resp.data?.deleted ?? 0} expired tokens`);
+      const failed = resp.data?.errors.length ?? 0;
+      toast.success(`Deleted ${resp.data?.deleted ?? 0} expired tokens`
+        + (failed ? `; ${failed} could not be deleted and stay in the list` : ''));
       setBulkDeleteConfirm(false);
     },
     onError: (err) => toast.error(`Failed: ${err.message}`),
@@ -83,24 +93,16 @@ export default function Dashboard() {
 
   const stats = statsResp?.data;
   const tokens = tokensResp?.data ?? [];
+  const total = tokensResp?.pagination?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const filtered = statusFilter !== 'all' || search !== '';
+  // After a dismiss or "Delete expired" the current page may be past the end: go to the last one
+  useEffect(() => {
+    if (tokensResp && page > Math.max(1, totalPages)) setPage(Math.max(1, totalPages));
+  }, [tokensResp, page, totalPages]);
 
-  const toggleSelect = (id: string) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedIds(next);
-  };
-
-  const handleExport = async (format: 'json' | 'csv') => {
-    const resp = await apiFetch(`/tokens/export?format=${format}`);
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tokens.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const handleExport = (format: 'json' | 'csv') =>
+    downloadFromApi(`/tokens/export?format=${format}`, `tokens.${format}`).catch((err: Error) => toast.error(`Export failed: ${err.message}`));
 
   return (
     <div className="space-y-6">
@@ -134,7 +136,7 @@ export default function Dashboard() {
             type="text"
             placeholder="Search tokens..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
@@ -143,7 +145,7 @@ export default function Dashboard() {
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.key}
-              onClick={() => setStatusFilter(f.key)}
+              onClick={() => { setStatusFilter(f.key); setPage(1); }}
               className={cn(
                 'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
                 statusFilter === f.key
@@ -181,6 +183,10 @@ export default function Dashboard() {
         <div className="flex items-center justify-center py-12">
           <RefreshCw className="w-5 h-5 animate-spin text-gray-400" />
           <span className="ml-2 text-gray-500">Loading tokens...</span>
+        </div>
+      ) : tokens.length === 0 && filtered ? (
+        <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
+          <p className="text-sm text-gray-500">No tokens match this filter.</p>
         </div>
       ) : tokens.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
@@ -251,11 +257,11 @@ export default function Dashboard() {
                       {formatDate(token.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {token.status !== 'revoked' && token.status !== 'expired' ? (
+                      {holdsIonosUser(token) ? (
                         <button
                           onClick={() => setDeleteTarget(token.id)}
                           className="text-red-500 hover:text-red-700 p-1"
-                          title="Revoke token"
+                          title={token.status === 'expired' ? 'Revoke (removes its IONOS user)' : 'Revoke token'}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -274,6 +280,20 @@ export default function Dashboard() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-gray-500">
+          <span>Page {page} of {totalPages} ({total} tokens)</span>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(page - 1)} disabled={page <= 1} className="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50">
+              Previous
+            </button>
+            <button onClick={() => setPage(page + 1)} disabled={page >= totalPages} className="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50">
+              Next
+            </button>
+          </div>
         </div>
       )}
 

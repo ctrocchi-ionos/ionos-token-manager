@@ -1,15 +1,32 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getToken, revokeToken, regenerateToken } from '@/api/client';
+import { getToken, revokeToken, regenerateToken, type SharedResource } from '@/api/client';
 import PermissionPicker from '@/components/PermissionPicker';
-import ResourceBrowser from '@/components/ResourceBrowser';
 import ExpiryBadge from '@/components/ExpiryBadge';
 import TokenReveal from '@/components/TokenReveal';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { cn, statusColor, formatDate, formatTtl } from '@/lib/utils';
 import { toast } from 'sonner';
-import { ArrowLeft, RefreshCw, Trash2, Copy, Check, Loader2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Trash2, Copy, Check, Loader2, Server } from 'lucide-react';
+
+/** What was shared with the token when it was created (stored with the token; no IONOS call needed). */
+function SharedResourceList({ resources }: { resources: SharedResource[] }) {
+  return (
+    <ul className="space-y-2">
+      {resources.map((r) => (
+        <li key={r.resourceId} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3 text-sm">
+          <Server className="w-4 h-4 text-gray-400" />
+          <span className="font-medium">{r.name}</span>
+          <span className="text-xs text-gray-400">{r.type}</span>
+          <span className="ml-auto text-xs text-gray-500">
+            {[r.editPrivilege && 'can edit', r.sharePrivilege && 'can share'].filter(Boolean).join(', ') || 'read only'}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function TokenDetail() {
   const { id } = useParams<{ id: string }>();
@@ -157,7 +174,7 @@ export default function TokenDetail() {
             <hr />
             <div>
               <h3 className="font-medium text-gray-900 mb-3">Shared Resources</h3>
-              <ResourceBrowser value={token.sharedResources} onChange={() => {}} readOnly />
+              <SharedResourceList resources={token.sharedResources} />
             </div>
           </>
         )}
@@ -166,13 +183,15 @@ export default function TokenDetail() {
       {/* Actions */}
       {token.status !== 'revoked' && (
         <div className="flex gap-3">
-          <button
-            onClick={() => setRegenConfirm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Regenerate Token
-          </button>
+          {!token.cleanedUpAt && ( // its IONOS user was removed: nothing left to regenerate
+            <button
+              onClick={() => setRegenConfirm(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Regenerate Token
+            </button>
+          )}
           <button
             onClick={() => setRevokeConfirm(true)}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium"

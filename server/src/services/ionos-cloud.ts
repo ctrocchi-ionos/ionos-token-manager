@@ -3,16 +3,11 @@ import type {
   IonosUser,
   IonosUserListResponse,
   IonosGroup,
-  IonosGroupListResponse,
   IonosGroupProperties,
   IonosDatacenter,
   IonosDatacenterListResponse,
-  IonosResource,
-  IonosResourceByTypeResponse,
-  IonosShare,
-  IonosShareListResponse,
 } from '../types/ionos.js';
-import type { PermissionFlags, SharedResource } from '../types/app.js';
+import type { PermissionFlags } from '../types/app.js';
 
 const CLOUD_BASE = 'https://api.ionos.com/cloudapi/v6';
 
@@ -148,12 +143,6 @@ export async function createGroup(adminToken: string, name: string, permissions:
   return resp.data;
 }
 
-export async function listGroups(adminToken: string): Promise<IonosGroup[]> {
-  const client = createClient(adminToken);
-  const resp = await client.get<IonosGroupListResponse>('/um/groups?depth=1');
-  return resp.data.items ?? [];
-}
-
 export async function deleteGroup(adminToken: string, groupId: string): Promise<void> {
   const client = createClient(adminToken);
   const resp = await client.delete(`/um/groups/${groupId}`);
@@ -182,12 +171,6 @@ export async function shareResourceWithGroup(
   await waitForCompletion(resp, adminToken);
 }
 
-export async function listGroupShares(adminToken: string, groupId: string): Promise<IonosShare[]> {
-  const client = createClient(adminToken);
-  const resp = await client.get<IonosShareListResponse>(`/um/groups/${groupId}/shares?depth=1`);
-  return resp.data.items ?? [];
-}
-
 // ── Resources ──
 
 export async function listDatacenters(adminToken: string): Promise<IonosDatacenter[]> {
@@ -196,14 +179,3 @@ export async function listDatacenters(adminToken: string): Promise<IonosDatacent
   return resp.data.items ?? [];
 }
 
-export async function listResourcesByType(adminToken: string, type: string): Promise<IonosResource[]> {
-  const client = createClient(adminToken);
-  const resp = await client.get<IonosResourceByTypeResponse>(`/um/resources/${type}?depth=1`);
-  return resp.data.items ?? [];
-}
-
-export async function listAllResources(adminToken: string): Promise<IonosResource[]> {
-  const client = createClient(adminToken);
-  const resp = await client.get<IonosResourceByTypeResponse>('/um/resources?depth=1');
-  return resp.data.items ?? [];
-}

@@ -40,10 +40,6 @@ export const PERMISSION_GROUPS: Record<string, Record<string, string>> = {
   },
 };
 
-export const ALL_PERMISSION_KEYS = Object.values(PERMISSION_GROUPS).flatMap((group) =>
-  Object.keys(group),
-);
-
 export function getPermissionLabel(key: string): string {
   for (const group of Object.values(PERMISSION_GROUPS)) {
     if (key in group) return group[key];

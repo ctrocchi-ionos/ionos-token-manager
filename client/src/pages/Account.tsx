@@ -49,7 +49,7 @@ export default function Account() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Account</h1>
+          <h1 className="text-2xl font-bold text-gray-900">IONOS Users</h1>
           {data && (
             <p className="text-sm text-gray-500 mt-1">Contract #{data.contractNumber}</p>
           )}
@@ -77,7 +77,7 @@ export default function Account() {
           <div>
             <p className="font-medium text-sm">Failed to load account data</p>
             <p className="text-xs mt-1 text-red-600">{error instanceof Error ? error.message : 'Unknown error'}</p>
-            <p className="text-xs mt-1 text-red-500">If you recently configured your API token, it may contain invalid characters. Go to Settings and reconfigure it.</p>
+            <p className="text-xs mt-1 text-red-500">If this keeps happening, check this DCD account's API token in Settings, or replace it.</p>
           </div>
         </div>
       ) : (

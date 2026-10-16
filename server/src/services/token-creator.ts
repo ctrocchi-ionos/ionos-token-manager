@@ -9,6 +9,7 @@ import * as q from '../workspace/queries.js';
 import { getAccountAdminToken } from './dcd-accounts.js';
 import { TokenCreationError, AppError, NotFoundError } from '../middleware/error-handler.js';
 import { withKeyLock } from '../lib/key-lock.js';
+import { isoUtc } from '../lib/time.js';
 import type { Workspace } from '../workspace/registry.js';
 import type { TokenRow } from '../workspace/types.js';
 import type { CreateTokenRequest, CreateTokenResult, ManagedTokenResponse } from '../types/app.js';
@@ -327,11 +328,11 @@ export function tokenToResponse(token: TokenRow): ManagedTokenResponse {
     sharedResources: JSON.parse(token.shared_resources),
     templateId: token.template_id,
     ttlSeconds: token.ttl_seconds,
-    createdAt: token.created_at,
-    expiresAt: token.expires_at,
-    lastRegeneratedAt: token.last_regenerated_at,
+    createdAt: isoUtc(token.created_at),
+    expiresAt: isoUtc(token.expires_at),
+    lastRegeneratedAt: isoUtc(token.last_regenerated_at),
     status: token.status,
     cleanupOnDelete: token.cleanup_on_delete === 1,
-    cleanedUpAt: token.cleaned_up_at,
+    cleanedUpAt: isoUtc(token.cleaned_up_at),
   };
 }
